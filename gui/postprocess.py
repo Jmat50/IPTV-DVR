@@ -81,7 +81,14 @@ def clean_with_commercial_cleaner(input_path: Path, *, log_file: Path) -> Path:
         )
 
     ffmpeg_dir = ffmpeg_exe().parent
-    output_path = _next_available(input_path.with_name(f"{input_path.stem}_clean.mkv"))
+    default_clean = input_path.with_name(f"{input_path.stem}_clean.mkv")
+    reserved_prior_clean: Path | None = None
+
+    # CommercialCleaner always writes "<input>_clean.mkv". If that file already
+    # exists, move it aside first so no prior cleaned result is overwritten.
+    if default_clean.exists():
+        reserved_prior_clean = _next_available(default_clean)
+        default_clean.replace(reserved_prior_clean)
 
     # README contains inconsistent flag spellings; try both for compatibility.
     candidates = [
@@ -105,15 +112,17 @@ def clean_with_commercial_cleaner(input_path: Path, *, log_file: Path) -> Path:
     else:
         raise RuntimeError(f"CommercialCleaner failed with exit code {last_code}")
 
-    default_clean = input_path.with_name(f"{input_path.stem}_clean.mkv")
     if not default_clean.is_file():
+        # If cleaner failed to produce output, restore the previous clean file name.
+        if reserved_prior_clean is not None and reserved_prior_clean.is_file():
+            reserved_prior_clean.replace(default_clean)
         raise FileNotFoundError(
             f"CommercialCleaner completed but no cleaned file was found at {default_clean}",
         )
 
-    if default_clean.resolve() != output_path.resolve():
-        default_clean.replace(output_path)
-    return output_path
+    # Keep cleaner output as canonical "_clean.mkv"; if we preserved an older
+    # cleaned file, it remains as "_clean_#.mkv".
+    return default_clean
 
 
 def run_postprocessing(job, *, recorded_path: Path, log_file: Path) -> PostprocessResult:
