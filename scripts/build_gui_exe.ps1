@@ -1,11 +1,17 @@
 # Build standalone Windows GUI: gui\iptv-gui.exe (PyInstaller onefile + windowed).
-# This script ensures FFmpeg exists at gui\ffmpeg\ffmpeg.exe.
-# It skips download when already present unless -ForceFfmpeg is passed.
+# This script ensures required runtime dependencies are present:
+# - gui\ffmpeg\ffmpeg.exe + gui\ffmpeg\ffprobe.exe
+# - tools\commercialcleaner\CommercialCleaner.exe
+# - tools\comskip\comskip.exe
+# It skips each install when already present unless force switches are passed.
 # Prereqs: Python 3.10+ on PATH (py launcher or python), pip, Internet for pip/pyinstaller and FFmpeg download.
 #
 # Close any running copy of gui\iptv-gui.exe (or an older gui\iptv-recorder.exe) before rebuilding.
 param(
-    [switch]$ForceFfmpeg
+    [switch]$ForceFfmpeg,
+    [switch]$ForceCommercialTools,
+    [string]$ComskipZipPath = "",
+    [string]$ComskipDownloadUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,12 +30,47 @@ $FfmpegDest = Join-Path $Root "gui\ffmpeg"
 $FfmpegScript = Join-Path $Root "scripts\download_ffmpeg.ps1"
 if (-not (Test-Path $FfmpegScript)) { throw "Missing $FfmpegScript" }
 $BundledFfmpegExe = Join-Path $FfmpegDest "ffmpeg.exe"
-if ($ForceFfmpeg -or -not (Test-Path $BundledFfmpegExe)) {
+$BundledFfprobeExe = Join-Path $FfmpegDest "ffprobe.exe"
+if ($ForceFfmpeg -or -not (Test-Path $BundledFfmpegExe) -or -not (Test-Path $BundledFfprobeExe)) {
     Write-Host "Installing / refreshing bundled FFmpeg..."
     powershell -NoProfile -ExecutionPolicy Bypass -File $FfmpegScript -DestDir $FfmpegDest
 }
 else {
-    Write-Host "Bundled FFmpeg already present; skipping download:" $BundledFfmpegExe
+    Write-Host "Bundled FFmpeg + FFprobe already present; skipping download."
+    Write-Host " - " $BundledFfmpegExe
+    Write-Host " - " $BundledFfprobeExe
+}
+
+$CleanerExe = Join-Path $Root "tools\commercialcleaner\CommercialCleaner.exe"
+$CleanerScript = Join-Path $Root "scripts\download_commercial_cleaner.ps1"
+if (-not (Test-Path $CleanerScript)) { throw "Missing $CleanerScript" }
+if ($ForceCommercialTools -or -not (Test-Path $CleanerExe)) {
+    Write-Host "Installing / refreshing CommercialCleaner..."
+    powershell -NoProfile -ExecutionPolicy Bypass -File $CleanerScript
+}
+else {
+    Write-Host "CommercialCleaner already present; skipping download:" $CleanerExe
+}
+
+$ComskipExe = Join-Path $Root "tools\comskip\comskip.exe"
+$ComskipScript = Join-Path $Root "scripts\setup_comskip.ps1"
+if (-not (Test-Path $ComskipScript)) { throw "Missing $ComskipScript" }
+if ($ForceCommercialTools -or -not (Test-Path $ComskipExe)) {
+    Write-Host "Installing / refreshing Comskip..."
+    $ComskipArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ComskipScript)
+    if (-not [string]::IsNullOrWhiteSpace($ComskipZipPath)) {
+        $ComskipArgs += @("-ZipPath", $ComskipZipPath)
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($ComskipDownloadUrl)) {
+        $ComskipArgs += @("-DownloadUrl", $ComskipDownloadUrl)
+    }
+    else {
+        throw "Comskip is missing. Provide -ComskipZipPath <zip> or -ComskipDownloadUrl <url>."
+    }
+    powershell @ComskipArgs
+}
+else {
+    Write-Host "Comskip already present; skipping install:" $ComskipExe
 }
 
 $Main = Join-Path $Root "gui\main.py"
@@ -76,3 +117,4 @@ Remove-Item $StageDist -Recurse -Force
 
 Write-Host "OK:" $Final
 Write-Host "Bundled FFmpeg:" (Join-Path $FfmpegDest "ffmpeg.exe")
+Write-Host "Bundled FFprobe:" (Join-Path $FfmpegDest "ffprobe.exe")

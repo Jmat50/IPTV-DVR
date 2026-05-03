@@ -22,7 +22,15 @@ from config_store import AppConfig, Job, Source, job_by_id, load_config, save_co
 from duration_parse import parse_duration
 from job_runner import run_job
 from m3u_load import load_m3u
-from paths import ffmpeg_exe, is_frozen, log_dir, project_root
+from paths import (
+    ffmpeg_exe,
+    ffprobe_exe,
+    is_frozen,
+    log_dir,
+    project_root,
+    resolve_commercial_cleaner_exe,
+    resolve_comskip_exe,
+)
 from recorder import build_ffmpeg_argv, run_ffmpeg
 from scheduler_win import sync_all_tasks
 
@@ -162,7 +170,7 @@ class App(tk.Tk):
 
         self.refresh_lists()
         self._fit_main_window_to_content()
-        self.after(100, self._maybe_prompt_install_ffmpeg)
+        self.after(100, self._maybe_prompt_install_dependencies)
 
     def _fit_main_window_to_content(self) -> None:
         self.update_idletasks()
@@ -258,12 +266,13 @@ class App(tk.Tk):
 
     def on_ffmpeg_status(self) -> None:
         ff = ffmpeg_exe()
-        if ff.is_file():
-            messagebox.showinfo("FFmpeg", f"Embedded binary found:\n{ff}")
+        fp = ffprobe_exe()
+        if ff.is_file() and fp.is_file():
+            messagebox.showinfo("FFmpeg", f"Embedded binaries found:\n{ff}\n{fp}")
         else:
             messagebox.showwarning(
                 "FFmpeg missing",
-                f"No embedded FFmpeg at:\n{ff}\n\n"
+                f"Missing one or more binaries:\n{ff}\n{fp}\n\n"
                 "Run scripts\\download_ffmpeg.ps1 (repo ffmpeg) or\n"
                 "scripts\\download_ffmpeg.ps1 -DestDir .\\gui\\ffmpeg (portable next to the .exe).",
             )
@@ -286,12 +295,19 @@ class App(tk.Tk):
             parent=self,
         )
 
+    def _maybe_prompt_install_dependencies(self) -> None:
+        self._maybe_prompt_install_ffmpeg()
+        self._maybe_prompt_install_postprocess_tools()
+
+    def _has_ffmpeg_bundle(self) -> bool:
+        return ffmpeg_exe().is_file() and ffprobe_exe().is_file()
+
     def _maybe_prompt_install_ffmpeg(self) -> None:
-        if ffmpeg_exe().is_file():
+        if self._has_ffmpeg_bundle():
             return
         yes = messagebox.askyesno(
             "FFmpeg missing",
-            "FFmpeg is required for recording.\n\n"
+            "FFmpeg and FFprobe are required for recording and post-processing.\n\n"
             "Would you like to download and install it now using PowerShell?",
             parent=self,
         )
@@ -307,6 +323,62 @@ class App(tk.Tk):
         def worker() -> None:
             ok, msg = self._install_ffmpeg_via_powershell()
             self.after(0, lambda: self._on_ffmpeg_install_done(ok, msg))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _maybe_prompt_install_postprocess_tools(self) -> None:
+        missing: list[str] = []
+        if resolve_commercial_cleaner_exe() is None:
+            missing.append("CommercialCleaner")
+        if resolve_comskip_exe() is None:
+            missing.append("Comskip")
+        if not missing:
+            return
+        yes = messagebox.askyesno(
+            "Post-processing tools missing",
+            "Commercial removal requires additional tools.\n\n"
+            f"Missing: {', '.join(missing)}\n\n"
+            "Would you like to install missing tools now?",
+            parent=self,
+        )
+        if not yes:
+            return
+
+        comskip_zip: Path | None = None
+        if "Comskip" in missing:
+            zip_path = filedialog.askopenfilename(
+                title="Select Comskip ZIP",
+                filetypes=[("ZIP files", "*.zip"), ("All files", "*.*")],
+                parent=self,
+            )
+            if not zip_path:
+                messagebox.showwarning(
+                    "Comskip not installed",
+                    "Comskip ZIP was not selected.\n\n"
+                    "Commercial removal will remain unavailable until Comskip is installed.",
+                    parent=self,
+                )
+                missing = [m for m in missing if m != "Comskip"]
+            else:
+                comskip_zip = Path(zip_path)
+
+        if not missing:
+            return
+
+        def worker() -> None:
+            ok = True
+            details: list[str] = []
+            if "CommercialCleaner" in missing:
+                cc_ok, cc_msg = self._install_commercial_cleaner_via_powershell()
+                ok = ok and cc_ok
+                if not cc_ok:
+                    details.append(f"CommercialCleaner: {cc_msg}")
+            if "Comskip" in missing and comskip_zip is not None:
+                cs_ok, cs_msg = self._install_comskip_via_powershell(comskip_zip)
+                ok = ok and cs_ok
+                if not cs_ok:
+                    details.append(f"Comskip: {cs_msg}")
+            self.after(0, lambda: self._on_postprocess_install_done(ok, details))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -337,22 +409,29 @@ class App(tk.Tk):
                 "Expand-Archive -Path $zip -DestinationPath $work -Force; "
                 "$inner=Get-ChildItem -Path $work -Directory | Where-Object { $_.Name -like 'ffmpeg-*' } | Select-Object -First 1; "
                 "if (-not $inner) { throw 'Unexpected zip layout.' }; "
-                "$bin=Join-Path $inner.FullName 'bin\\ffmpeg.exe'; "
-                "if (-not (Test-Path $bin)) { throw 'ffmpeg.exe not found in downloaded archive.' }; "
-                "Copy-Item -Force $bin (Join-Path $dest 'ffmpeg.exe'); "
+                "$ffmpegBin=Join-Path $inner.FullName 'bin\\ffmpeg.exe'; "
+                "$ffprobeBin=Join-Path $inner.FullName 'bin\\ffprobe.exe'; "
+                "if (-not (Test-Path $ffmpegBin)) { throw 'ffmpeg.exe not found in downloaded archive.' }; "
+                "if (-not (Test-Path $ffprobeBin)) { throw 'ffprobe.exe not found in downloaded archive.' }; "
+                "Copy-Item -Force $ffmpegBin (Join-Path $dest 'ffmpeg.exe'); "
+                "Copy-Item -Force $ffprobeBin (Join-Path $dest 'ffprobe.exe'); "
                 "Remove-Item $work -Recurse -Force;"
             )
             cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_inline]
             r = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
-        if r.returncode == 0 and ffmpeg_exe().is_file():
+        if r.returncode == 0 and self._has_ffmpeg_bundle():
             return True, (r.stdout or "").strip()
         msg = (r.stderr or r.stdout or "").strip()
         return False, msg or f"Installer exited with code {r.returncode}."
 
     def _on_ffmpeg_install_done(self, ok: bool, msg: str) -> None:
         if ok:
-            messagebox.showinfo("FFmpeg install", f"FFmpeg installed successfully:\n{ffmpeg_exe()}", parent=self)
+            messagebox.showinfo(
+                "FFmpeg install",
+                f"FFmpeg installed successfully:\n{ffmpeg_exe()}\n{ffprobe_exe()}",
+                parent=self,
+            )
         else:
             messagebox.showerror(
                 "FFmpeg install failed",
@@ -361,6 +440,58 @@ class App(tk.Tk):
                 f"Details:\n{msg}",
                 parent=self,
             )
+
+    def _install_commercial_cleaner_via_powershell(self) -> tuple[bool, str]:
+        root = project_root()
+        script = root / "scripts" / "download_commercial_cleaner.ps1"
+        if not script.is_file():
+            return False, f"missing installer script: {script}"
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=str(root))
+        if r.returncode == 0 and resolve_commercial_cleaner_exe() is not None:
+            return True, (r.stdout or "").strip()
+        msg = (r.stderr or r.stdout or "").strip()
+        return False, msg or f"installer exited with code {r.returncode}"
+
+    def _install_comskip_via_powershell(self, zip_path: Path) -> tuple[bool, str]:
+        root = project_root()
+        script = root / "scripts" / "setup_comskip.ps1"
+        if not script.is_file():
+            return False, f"missing installer script: {script}"
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+            "-ZipPath",
+            str(zip_path),
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=str(root))
+        if r.returncode == 0 and resolve_comskip_exe() is not None:
+            return True, (r.stdout or "").strip()
+        msg = (r.stderr or r.stdout or "").strip()
+        return False, msg or f"installer exited with code {r.returncode}"
+
+    def _on_postprocess_install_done(self, ok: bool, details: list[str]) -> None:
+        if ok:
+            messagebox.showinfo("Tools install", "Post-processing tools are ready.", parent=self)
+            return
+        detail_text = "\n".join(details) if details else "Unknown installation error."
+        messagebox.showerror(
+            "Tools install failed",
+            "One or more post-processing tools failed to install.\n\n"
+            f"{detail_text}",
+            parent=self,
+        )
 
     def selected_source(self) -> Source | None:
         sel = self.src_tree.selection()

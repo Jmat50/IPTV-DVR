@@ -1,4 +1,5 @@
-# Downloads latest Windows x64 FFmpeg (GPL) from BtbN FFmpeg-Builds into DestDir\ffmpeg.exe
+# Downloads latest Windows x64 FFmpeg (GPL) from BtbN FFmpeg-Builds into
+# DestDir\ffmpeg.exe and DestDir\ffprobe.exe.
 # License: FFmpeg is LGPL/GPL — see https://ffmpeg.org/legal.html and the build's README.
 param(
     # Default: <repo>\ffmpeg. For portable GUI exe use: -DestDir ".\gui\ffmpeg"
@@ -27,8 +28,12 @@ Invoke-WebRequest -Uri $ZipUrl -OutFile $Zip
 Expand-Archive -Path $Zip -DestinationPath $Work -Force
 $Inner = Get-ChildItem -Path $Work -Directory | Where-Object { $_.Name -like "ffmpeg-*" } | Select-Object -First 1
 if (-not $Inner) { throw "Unexpected zip layout under $Work" }
-$Bin = Join-Path $Inner.FullName "bin\ffmpeg.exe"
-if (-not (Test-Path $Bin)) { throw "ffmpeg.exe not found at $Bin" }
-Copy-Item -Force $Bin (Join-Path $DestDir "ffmpeg.exe")
+$FfmpegBin = Join-Path $Inner.FullName "bin\ffmpeg.exe"
+$FfprobeBin = Join-Path $Inner.FullName "bin\ffprobe.exe"
+if (-not (Test-Path $FfmpegBin)) { throw "ffmpeg.exe not found at $FfmpegBin" }
+if (-not (Test-Path $FfprobeBin)) { throw "ffprobe.exe not found at $FfprobeBin" }
+Copy-Item -Force $FfmpegBin (Join-Path $DestDir "ffmpeg.exe")
+Copy-Item -Force $FfprobeBin (Join-Path $DestDir "ffprobe.exe")
 Remove-Item $Work -Recurse -Force
 Write-Host "Installed:" (Join-Path $DestDir "ffmpeg.exe")
+Write-Host "Installed:" (Join-Path $DestDir "ffprobe.exe")

@@ -30,6 +30,10 @@ def ffmpeg_exe() -> Path:
     return candidates[0]
 
 
+def ffprobe_exe() -> Path:
+    return ffmpeg_exe().with_name("ffprobe.exe")
+
+
 def config_file() -> Path:
     return project_root() / "config.json"
 
