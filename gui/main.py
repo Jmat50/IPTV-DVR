@@ -12,7 +12,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import traceback
 import tkinter as tk
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -20,7 +22,7 @@ from config_store import AppConfig, Job, Source, job_by_id, load_config, save_co
 from duration_parse import parse_duration
 from job_runner import run_job
 from m3u_load import load_m3u
-from paths import ffmpeg_exe, is_frozen, project_root
+from paths import ffmpeg_exe, is_frozen, log_dir, project_root
 from recorder import build_ffmpeg_argv, run_ffmpeg
 from scheduler_win import sync_all_tasks
 
@@ -38,6 +40,40 @@ def _main_script_path() -> Path:
     return Path(__file__).resolve()
 
 
+def _error_log_path() -> Path:
+    p = log_dir() / "error.log"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.touch(exist_ok=True)
+    return p
+
+
+def _append_error_log(text: str) -> None:
+    p = _error_log_path()
+    with open(p, "a", encoding="utf-8") as fp:
+        fp.write(text)
+
+
+def _log_exception(context: str, exc_type: type[BaseException], exc_value: BaseException, exc_tb) -> None:
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    body = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    _append_error_log(f"\n---\n[{ts}] {context}\n{body}")
+
+
+def _install_exception_hooks() -> None:
+    def _sys_hook(exc_type: type[BaseException], exc_value: BaseException, exc_tb) -> None:
+        _log_exception("Unhandled exception (main thread)", exc_type, exc_value, exc_tb)
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _sys_hook
+
+    if hasattr(threading, "excepthook"):
+        def _thread_hook(args: threading.ExceptHookArgs) -> None:
+            tname = args.thread.name if args.thread else "unknown"
+            _log_exception(f"Unhandled exception (thread: {tname})", args.exc_type, args.exc_value, args.exc_traceback)
+
+        threading.excepthook = _thread_hook
+
+
 def _run_job_cli() -> None:
     p = argparse.ArgumentParser(prog="iptv-gui")
     p.add_argument("run_job", nargs="?", help=argparse.SUPPRESS)
@@ -51,11 +87,14 @@ class App(tk.Tk):
         super().__init__()
         self.title("IPTV Recorder (local)")
         self.cfg: AppConfig = load_config()
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.report_callback_exception = self.on_tk_callback_exception
 
         menubar = tk.Menu(self)
         fm = tk.Menu(menubar, tearoff=0)
         fm.add_command(label="Save config", command=self.on_save)
         fm.add_command(label="Sync Windows tasks", command=self.on_sync)
+        fm.add_command(label="Error Log", command=self.on_open_error_log)
         fm.add_separator()
         fm.add_command(label="Quit", command=self.destroy)
         menubar.add_cascade(label="File", menu=fm)
@@ -162,10 +201,30 @@ class App(tk.Tk):
         return f"weekly {days} @ {t}"
 
     def on_save(self) -> None:
-        save_config(self.cfg)
-        messagebox.showinfo("Saved", "Configuration written to config.json")
+        if self.persist_and_sync(
+            parent=self,
+            show_success=True,
+            success_title="Saved",
+            success_message="Configuration written and Windows tasks synced.",
+        ):
+            self.refresh_lists()
 
     def on_sync(self) -> None:
+        self.persist_and_sync(
+            parent=self,
+            show_success=True,
+            success_title="Tasks",
+            success_message="Windows scheduled tasks are in sync.",
+        )
+
+    def persist_and_sync(
+        self,
+        *,
+        parent: tk.Misc | None = None,
+        show_success: bool = False,
+        success_title: str = "Saved",
+        success_message: str = "Configuration written to config.json",
+    ) -> bool:
         save_config(self.cfg)
         frozen = is_frozen()
         launcher = Path(sys.executable) if frozen else _python_for_tasks()
@@ -177,10 +236,25 @@ class App(tk.Tk):
             frozen_main=frozen,
             main_script=script,
         )
-        if ok:
-            messagebox.showinfo("Tasks", "Windows scheduled tasks are in sync.")
-        else:
-            messagebox.showerror("Task error", err)
+        parent_win = parent if parent is not None else self
+        if not ok:
+            messagebox.showerror("Task error", err, parent=parent_win)
+            return False
+        if show_success:
+            messagebox.showinfo(success_title, success_message, parent=parent_win)
+        return True
+
+    def on_close(self) -> None:
+        if not self.persist_and_sync(parent=self):
+            leave_anyway = messagebox.askyesno(
+                "Exit with unsynced tasks?",
+                "Task sync failed while closing.\n\nExit anyway?\n"
+                "If you exit now, scheduled recordings may not run as expected.",
+                parent=self,
+            )
+            if not leave_anyway:
+                return
+        self.destroy()
 
     def on_ffmpeg_status(self) -> None:
         ff = ffmpeg_exe()
@@ -193,6 +267,24 @@ class App(tk.Tk):
                 "Run scripts\\download_ffmpeg.ps1 (repo ffmpeg) or\n"
                 "scripts\\download_ffmpeg.ps1 -DestDir .\\gui\\ffmpeg (portable next to the .exe).",
             )
+
+    def on_open_error_log(self) -> None:
+        p = _error_log_path()
+        try:
+            if sys.platform.startswith("win"):
+                subprocess.Popen(["notepad.exe", str(p)])
+            else:
+                subprocess.Popen([str(p)])
+        except Exception as e:
+            messagebox.showerror("Error Log", f"Could not open error log:\n{e}", parent=self)
+
+    def on_tk_callback_exception(self, exc_type, exc_value, exc_tb) -> None:
+        _log_exception("Unhandled exception (Tk callback)", exc_type, exc_value, exc_tb)
+        messagebox.showerror(
+            "Unexpected Error",
+            f"An unexpected error occurred.\n\nDetails were written to:\n{_error_log_path()}",
+            parent=self,
+        )
 
     def _maybe_prompt_install_ffmpeg(self) -> None:
         if ffmpeg_exe().is_file():
@@ -323,7 +415,8 @@ class App(tk.Tk):
             return
         self.cfg.sources = [x for x in self.cfg.sources if x.id != s.id]
         self.cfg.jobs = [j for j in self.cfg.jobs if j.source_id != s.id]
-        self.refresh_lists()
+        if self.persist_and_sync(parent=self):
+            self.refresh_lists()
 
     def add_job(self) -> None:
         if not self.cfg.sources:
@@ -345,7 +438,8 @@ class App(tk.Tk):
         if not messagebox.askyesno("Remove", f"Remove job {j.name!r}?"):
             return
         self.cfg.jobs = [x for x in self.cfg.jobs if x.id != j.id]
-        self.refresh_lists()
+        if self.persist_and_sync(parent=self):
+            self.refresh_lists()
 
     def run_selected_job_now(self) -> None:
         j = self.selected_job()
@@ -639,7 +733,8 @@ class JobEditor(tk.Toplevel):
         j.schedule.hour = hour
         j.schedule.minute = minute
 
-        save_config(self.cfg)
+        if not self.master.persist_and_sync(parent=self):
+            return
         self._on_done()
         self.destroy()
 
@@ -698,6 +793,7 @@ class ChannelPicker(tk.Toplevel):
 
 
 def main() -> None:
+    _install_exception_hooks()
     if len(sys.argv) >= 2 and sys.argv[1] == "run-job":
         p = argparse.ArgumentParser()
         p.add_argument("run_job", nargs="?")
