@@ -1,0 +1,72 @@
+"""Paths for dev (repo) and PyInstaller frozen exe (next to iptv-recorder.exe)."""
+
+from __future__ import annotations
+
+import sys
+from shutil import which
+from pathlib import Path
+
+
+def is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def project_root() -> Path:
+    # Frozen: e.g. gui\iptv-gui.exe — config.json and logs/ sit beside the exe.
+    if is_frozen() and getattr(sys, "executable", None):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+def ffmpeg_exe() -> Path:
+    root = project_root()
+    candidates = [
+        root / "ffmpeg" / "ffmpeg.exe",
+        root.parent / "ffmpeg" / "ffmpeg.exe",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    return candidates[0]
+
+
+def config_file() -> Path:
+    return project_root() / "config.json"
+
+
+def log_dir() -> Path:
+    d = project_root() / "logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def tools_dir() -> Path:
+    return project_root() / "tools"
+
+
+def comskip_exe() -> Path:
+    return tools_dir() / "comskip" / "comskip.exe"
+
+
+def comskip_ini() -> Path:
+    return tools_dir() / "comskip" / "comskip.ini"
+
+
+def commercial_cleaner_exe() -> Path:
+    return tools_dir() / "commercialcleaner" / "CommercialCleaner.exe"
+
+
+def resolve_comskip_exe() -> Path | None:
+    p = comskip_exe()
+    if p.is_file():
+        return p
+    on_path = which("comskip")
+    return Path(on_path) if on_path else None
+
+
+def resolve_commercial_cleaner_exe() -> Path | None:
+    p = commercial_cleaner_exe()
+    if p.is_file():
+        return p
+    on_path = which("CommercialCleaner")
+    return Path(on_path) if on_path else None

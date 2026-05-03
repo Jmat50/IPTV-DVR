@@ -1,0 +1,6 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="1",Demo Channel One
+#EXTVLCOPT:http-user-agent=DemoUA/1.0
+http://127.0.0.1:9/not-a-real-stream
+#EXTINF:-1,Second Channel
+http://127.0.0.1:9/second

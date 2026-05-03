@@ -1,0 +1,2 @@
+# Tkinter is part of the standard library on Windows CPython.
+# No pip dependencies required for the GUI.
