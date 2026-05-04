@@ -1,6 +1,6 @@
 # iptv-recorder
 
-Small Windows-friendly tools to **record a live stream** from an M3U playlist (or a direct URL) using **FFmpeg stream copy** (`-c copy`) so CPU and RAM stay low.
+Super lightweight utility to record a live stream from an M3U playlist (or a direct URL) using FFmpeg stream copy. This allows for lossless capture of a live stream without re-encoding.
 
 ## Embedded FFmpeg (GUI + optional CLI bundle)
 
