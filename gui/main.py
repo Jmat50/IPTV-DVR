@@ -32,7 +32,7 @@ from paths import (
     resolve_comskip_exe,
 )
 from recorder import build_ffmpeg_argv, run_ffmpeg
-from scheduler_win import sync_all_tasks
+from scheduler_win import list_running_app_tasks, sync_all_tasks
 
 
 def _python_for_tasks() -> Path:
@@ -95,6 +95,7 @@ class App(tk.Tk):
         super().__init__()
         self.title("IPTV Recorder (local)")
         self.cfg: AppConfig = load_config()
+        self._warned_close_skip_sync = False
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.report_callback_exception = self.on_tk_callback_exception
 
@@ -253,15 +254,29 @@ class App(tk.Tk):
         return True
 
     def on_close(self) -> None:
-        if not self.persist_and_sync(parent=self):
-            leave_anyway = messagebox.askyesno(
-                "Exit with unsynced tasks?",
-                "Task sync failed while closing.\n\nExit anyway?\n"
-                "If you exit now, scheduled recordings may not run as expected.",
-                parent=self,
-            )
-            if not leave_anyway:
-                return
+        # Avoid task re-registration while recordings are active.
+        running = list_running_app_tasks()
+        if running:
+            save_config(self.cfg)
+            if not self._warned_close_skip_sync:
+                self._warned_close_skip_sync = True
+                messagebox.showinfo(
+                    "Recording in progress",
+                    "A scheduled recording is currently running.\n\n"
+                    "Configuration was saved, but task sync was skipped while closing "
+                    "to avoid interrupting active recordings.",
+                    parent=self,
+                )
+        else:
+            if not self.persist_and_sync(parent=self):
+                leave_anyway = messagebox.askyesno(
+                    "Exit with unsynced tasks?",
+                    "Task sync failed while closing.\n\nExit anyway?\n"
+                    "If you exit now, scheduled recordings may not run as expected.",
+                    parent=self,
+                )
+                if not leave_anyway:
+                    return
         self.destroy()
 
     def on_ffmpeg_status(self) -> None:
@@ -579,16 +594,40 @@ class App(tk.Tk):
         if not messagebox.askyesno("Run now", f"Start job now?\n\n{j.name}"):
             return
 
-        def worker() -> None:
-            code = run_job(j.id)
-            self.after(0, lambda: self._on_manual_run_done(j.name, code))
-
-        threading.Thread(target=worker, daemon=True).start()
+        try:
+            self._launch_run_job_detached(j.id)
+        except Exception as e:
+            messagebox.showerror("Run now", f"Could not start job in detached mode:\n{e}")
+            return
         messagebox.showinfo(
             "Run now",
-            "Job started in background.\n"
+            "Job started in independent background process.\n"
+            "It will continue even if you close the GUI.\n\n"
             "Check logs in gui\\logs\\job_<id>.log while it runs.",
         )
+
+    def _launch_run_job_detached(self, job_id: str) -> None:
+        root = project_root()
+        frozen = is_frozen()
+        if frozen:
+            cmd = [str(Path(sys.executable)), "run-job", "--job-id", job_id]
+        else:
+            cmd = [str(_python_for_tasks()), str(_main_script_path()), "run-job", "--job-id", job_id]
+
+        kwargs: dict = {
+            "cwd": str(root),
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "close_fds": True,
+        }
+        if sys.platform == "win32":
+            create_new_process_group = 0x00000200
+            detached_process = 0x00000008
+            kwargs["creationflags"] = create_new_process_group | detached_process
+        else:
+            kwargs["start_new_session"] = True
+        subprocess.Popen(cmd, **kwargs)
 
     def _on_manual_run_done(self, name: str, code: int) -> None:
         if code == 0:

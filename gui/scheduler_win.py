@@ -53,6 +53,18 @@ def list_app_tasks() -> list[str]:
     return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
 
 
+def list_running_app_tasks() -> list[str]:
+    ps = (
+        "Get-ScheduledTask -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.TaskName -like 'IPTVRecApp_*' -and $_.State -eq 'Running' } | "
+        "ForEach-Object { $_.TaskName }"
+    )
+    r = _run_ps(ps)
+    if r.returncode != 0 or not r.stdout.strip():
+        return []
+    return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+
+
 def _trigger_ps(job: Job) -> str:
     h, m = job.schedule.hour, job.schedule.minute
     if job.schedule.mode == "daily":
