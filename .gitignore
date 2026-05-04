@@ -5,8 +5,8 @@ iptvrecord.exe
 .vscode/
 config.json
 logs/
-ffmpeg/ffmpeg.exe
 gui/ffmpeg/ffmpeg.exe
+gui/ffmpeg/ffprobe.exe
 tools/commercialcleaner/CommercialCleaner.exe
 gui/build/
 gui/_dist_stage/

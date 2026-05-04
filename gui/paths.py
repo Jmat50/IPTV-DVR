@@ -20,10 +20,10 @@ def project_root() -> Path:
 
 def ffmpeg_exe() -> Path:
     root = project_root()
-    candidates = [
-        root / "ffmpeg" / "ffmpeg.exe",
-        root.parent / "ffmpeg" / "ffmpeg.exe",
-    ]
+    if is_frozen():
+        candidates = [root / "ffmpeg" / "ffmpeg.exe"]
+    else:
+        candidates = [root / "gui" / "ffmpeg" / "ffmpeg.exe"]
     for p in candidates:
         if p.is_file():
             return p
@@ -48,29 +48,37 @@ def tools_dir() -> Path:
     return project_root() / "tools"
 
 
+def _tool_path_candidates(*parts: str) -> list[Path]:
+    root = project_root()
+    candidates = [root / "tools" / Path(*parts)]
+    parent = root.parent
+    candidates.append(parent / "tools" / Path(*parts))
+    return candidates
+
+
 def comskip_exe() -> Path:
-    return tools_dir() / "comskip" / "comskip.exe"
+    return _tool_path_candidates("comskip", "comskip.exe")[0]
 
 
 def comskip_ini() -> Path:
-    return tools_dir() / "comskip" / "comskip.ini"
+    return _tool_path_candidates("comskip", "comskip.ini")[0]
 
 
 def commercial_cleaner_exe() -> Path:
-    return tools_dir() / "commercialcleaner" / "CommercialCleaner.exe"
+    return _tool_path_candidates("commercialcleaner", "CommercialCleaner.exe")[0]
 
 
 def resolve_comskip_exe() -> Path | None:
-    p = comskip_exe()
-    if p.is_file():
-        return p
+    for p in _tool_path_candidates("comskip", "comskip.exe"):
+        if p.is_file():
+            return p
     on_path = which("comskip")
     return Path(on_path) if on_path else None
 
 
 def resolve_commercial_cleaner_exe() -> Path | None:
-    p = commercial_cleaner_exe()
-    if p.is_file():
-        return p
+    for p in _tool_path_candidates("commercialcleaner", "CommercialCleaner.exe"):
+        if p.is_file():
+            return p
     on_path = which("CommercialCleaner")
     return Path(on_path) if on_path else None

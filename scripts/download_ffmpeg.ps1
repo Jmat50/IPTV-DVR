@@ -2,13 +2,13 @@
 # DestDir\ffmpeg.exe and DestDir\ffprobe.exe.
 # License: FFmpeg is LGPL/GPL — see https://ffmpeg.org/legal.html and the build's README.
 param(
-    # Default: <repo>\ffmpeg. For portable GUI exe use: -DestDir ".\gui\ffmpeg"
+    # Default: <repo>\gui\ffmpeg
     [string]$DestDir = ""
 )
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($DestDir)) {
-    $DestDir = Join-Path $Root "ffmpeg"
+    $DestDir = Join-Path $Root "gui\ffmpeg"
 }
 else {
     if (-not [System.IO.Path]::IsPathRooted($DestDir)) {

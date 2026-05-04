@@ -2,21 +2,15 @@
 
 Super lightweight utility to record a live stream from an M3U playlist (or a direct URL) using FFmpeg stream copy. This allows for lossless capture of a live stream without re-encoding.
 
-## Embedded FFmpeg (GUI + optional CLI bundle)
+## Embedded FFmpeg (GUI)
 
-The **Tkinter GUI** expects a single bundled binary at `ffmpeg\ffmpeg.exe` (not committed to git). From the repo root:
+The **Tkinter GUI** uses FFmpeg from `gui\ffmpeg\` (not committed to git). From the repo root:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\download_ffmpeg.ps1
 ```
 
-Portable layout (FFmpeg next to the packaged GUI exe in `gui\`):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\download_ffmpeg.ps1 -DestDir ".\gui\ffmpeg"
-```
-
-This downloads a Windows x64 **GPL** build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (see [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html)). The Go CLI still supports `--ffmpeg` or `PATH` if you prefer not to embed.
+This downloads a Windows x64 **GPL** build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (see [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html)).
 
 ## Optional Post-Processing Tools
 
@@ -64,10 +58,7 @@ Manual PyInstaller: use the same flags as [`scripts/build_gui_exe.ps1`](scripts/
 
 After building, place **`ffmpeg.exe`** where the app can find it:
 
-| Layout | FFmpeg path |
-|--------|-------------|
-| Portable (copy only `gui\` elsewhere) | `gui\ffmpeg\ffmpeg.exe` (use `download_ffmpeg.ps1 -DestDir .\gui\ffmpeg`) |
-| Full repo checkout | `.\ffmpeg\ffmpeg.exe` (default download script) **or** `gui\ffmpeg\ffmpeg.exe` |
+- `gui\ffmpeg\ffmpeg.exe`
 
 Headless recording for Task Scheduler uses the same executable:
 

@@ -273,8 +273,7 @@ class App(tk.Tk):
             messagebox.showwarning(
                 "FFmpeg missing",
                 f"Missing one or more binaries:\n{ff}\n{fp}\n\n"
-                "Run scripts\\download_ffmpeg.ps1 (repo ffmpeg) or\n"
-                "scripts\\download_ffmpeg.ps1 -DestDir .\\gui\\ffmpeg (portable next to the .exe).",
+                "Run scripts\\download_ffmpeg.ps1 from the repo root.",
             )
 
     def on_open_error_log(self) -> None:
