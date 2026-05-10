@@ -12,37 +12,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\download_ffmpeg.ps1
 
 This downloads a Windows x64 **GPL** build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (see [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html)).
 
-## Optional Post-Processing Tools
-
-Two recurring job options are available in the GUI:
-
-- `Output format` (choose native FFmpeg container: `ts`, `mp4`, `mkv`, `mov`)
-- `Remove Commercials after Complete`
-
-When commercial removal is enabled, the pipeline is:
-
-1. Record stream directly to the selected output format
-2. Run MythTV `mythcommflag` to detect commercial frame boundaries
-3. Use FFmpeg to cut flagged commercial spans and produce `*_clean.(mkv|mp4)`
-
-The original recording is never overwritten.
-
-Set up dependencies:
-
-```powershell
-# mythcommflag from an existing executable
-powershell -ExecutionPolicy Bypass -File .\scripts\setup_mythcommflag.ps1 -ExePath "C:\path\mythcommflag.exe"
-
-# or mythcommflag from a zip archive
-powershell -ExecutionPolicy Bypass -File .\scripts\setup_mythcommflag.ps1 -ZipPath "C:\Downloads\mythcommflag.zip"
-```
-
-Expected paths:
-
-- `tools\mythtv\mythcommflag.exe`
-
-If installed elsewhere, `mythcommflag` is also resolved from `PATH`.
-
 ## Build standalone GUI (`gui\iptv-gui.exe`)
 
 From the repo root (installs/updates PyInstaller via pip, then builds a **one-file, windowed** executable into **`gui\iptv-gui.exe`**). Close any running `gui\iptv-gui.exe` before rebuilding.
@@ -70,8 +39,6 @@ iptv-gui.exe run-job --job-id <uuid>
 
 - Add / edit / remove **M3U sources** (local file or `http(s)` URL).
 - Define **recording jobs**: channel name, duration (`90m`, `1h30m`, …), output folder, filename pattern (`{date}`, `{time}`, `{channel}`), output format (`ts`, `mp4`, `mkv`, `mov`).
-- Optional post-processing on each job:
-  - **Remove Commercials after Complete** (uses `mythcommflag` + FFmpeg and creates a new cleaned file)
 - **Daily** or **weekly** (weekday checkboxes) at a wall-clock time.
 - **Save config** writes `config.json` (next to the app: repo root when using `python gui\main.py`, or the `gui\` folder when using `iptv-gui.exe`). **Sync Windows tasks** registers recurring tasks that run either  
   `pythonw.exe "…\gui\main.py" run-job --job-id <uuid>` (dev) or  

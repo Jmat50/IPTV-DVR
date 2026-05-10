@@ -1,17 +1,12 @@
 # Build standalone Windows GUI: gui\iptv-gui.exe (PyInstaller onefile + windowed).
 # This script ensures required runtime dependencies are present:
 # - gui\ffmpeg\ffmpeg.exe + gui\ffmpeg\ffprobe.exe
-# - tools\mythtv\mythcommflag.exe
-# It skips each install when already present unless force switches are passed.
+# It skips install when already present unless force switches are passed.
 # Prereqs: Python 3.10+ on PATH (py launcher or python), pip, Internet for pip/pyinstaller and FFmpeg download.
 #
 # Close any running copy of gui\iptv-gui.exe (or an older gui\iptv-recorder.exe) before rebuilding.
 param(
-    [switch]$ForceFfmpeg,
-    [switch]$ForceMythCommflag,
-    [string]$MythCommflagExePath = "",
-    [string]$MythCommflagZipPath = "",
-    [string]$MythCommflagDownloadUrl = ""
+    [switch]$ForceFfmpeg
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,30 +36,6 @@ else {
     Write-Host " - " $BundledFfprobeExe
 }
 
-$MythCommflagExe = Join-Path $Root "tools\mythtv\mythcommflag.exe"
-$MythCommflagScript = Join-Path $Root "scripts\setup_mythcommflag.ps1"
-if (-not (Test-Path $MythCommflagScript)) { throw "Missing $MythCommflagScript" }
-if ($ForceMythCommflag -or -not (Test-Path $MythCommflagExe)) {
-    Write-Host "Installing / refreshing mythcommflag..."
-    $MythArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $MythCommflagScript)
-    if (-not [string]::IsNullOrWhiteSpace($MythCommflagExePath)) {
-        $MythArgs += @("-ExePath", $MythCommflagExePath)
-    }
-    elseif (-not [string]::IsNullOrWhiteSpace($MythCommflagZipPath)) {
-        $MythArgs += @("-ZipPath", $MythCommflagZipPath)
-    }
-    elseif (-not [string]::IsNullOrWhiteSpace($MythCommflagDownloadUrl)) {
-        $MythArgs += @("-DownloadUrl", $MythCommflagDownloadUrl)
-    }
-    else {
-        throw "mythcommflag is missing. Provide -MythCommflagExePath <exe>, -MythCommflagZipPath <zip>, or -MythCommflagDownloadUrl <url>."
-    }
-    powershell @MythArgs
-}
-else {
-    Write-Host "mythcommflag already present; skipping install:" $MythCommflagExe
-}
-
 $Main = Join-Path $Root "gui\main.py"
 if (-not (Test-Path $Main)) { throw "Missing $Main" }
 
@@ -81,8 +52,7 @@ $Hidden = @(
     "m3u_load",
     "recorder",
     "scheduler_win",
-    "job_runner",
-    "postprocess"
+    "job_runner"
 )
 $HiddenArgs = @()
 foreach ($m in $Hidden) { $HiddenArgs += "--hidden-import"; $HiddenArgs += $m }

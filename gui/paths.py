@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from shutil import which
 from pathlib import Path
 
 
@@ -46,28 +45,3 @@ def log_dir() -> Path:
 
 def tools_dir() -> Path:
     return project_root() / "tools"
-
-
-def _tool_path_candidates(*parts: str) -> list[Path]:
-    root = project_root()
-    candidates = [root / "tools" / Path(*parts)]
-    parent = root.parent
-    candidates.append(parent / "tools" / Path(*parts))
-    return candidates
-
-
-def mythcommflag_exe() -> Path:
-    return _tool_path_candidates("mythtv", "mythcommflag.exe")[0]
-
-
-def resolve_mythcommflag_exe() -> Path | None:
-    for p in _tool_path_candidates("mythtv", "mythcommflag_compat.exe"):
-        if p.is_file():
-            return p
-    for p in _tool_path_candidates("mythtv", "mythcommflag.exe"):
-        if p.is_file():
-            return p
-    on_path = which("mythcommflag")
-    if not on_path:
-        on_path = which("mythcommflag.exe")
-    return Path(on_path) if on_path else None

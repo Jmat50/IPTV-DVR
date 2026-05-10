@@ -10,7 +10,6 @@ from pathlib import Path
 from config_store import job_by_id, load_config, source_by_id
 from m3u_load import find_channel, load_m3u
 from paths import log_dir
-from postprocess import run_postprocessing
 from recorder import build_ffmpeg_argv, run_ffmpeg
 
 
@@ -76,12 +75,4 @@ def run_job(job_id: str) -> int:
         print(f"ffmpeg exited {code}; see {log_path}", file=sys.stderr)
         return code
 
-    post = run_postprocessing(job, recorded_path=out, log_file=log_path)
-    if not post.success:
-        print(f"post-processing failed: {post.message}; see {log_path}", file=sys.stderr)
-        return post.exit_code
-    if getattr(job, "remove_commercials_after_complete", False):
-        settings = getattr(job, "commercial_settings", None)
-        strategy = getattr(settings, "strategy", "myth_only")
-        print(f"post-processing strategy: {strategy}; output: {post.output_path}")
     return 0

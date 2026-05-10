@@ -21,7 +21,6 @@ from tkinter import filedialog, messagebox, ttk
 
 from config_store import (
     AppConfig,
-    CommercialRemovalSettings,
     Job,
     Source,
     job_by_id,
@@ -38,7 +37,6 @@ from paths import (
     is_frozen,
     log_dir,
     project_root,
-    resolve_mythcommflag_exe,
 )
 from recorder import build_ffmpeg_argv, run_ffmpeg
 from scheduler_win import sync_all_tasks
@@ -110,6 +108,8 @@ class App(tk.Tk):
         menubar = tk.Menu(self)
         fm = tk.Menu(menubar, tearoff=0)
         fm.add_command(label="Save config", command=self.on_save)
+        fm.add_command(label="Load config", command=self.on_load_options)
+        fm.add_command(label="Reset config", command=self.on_reset_options)
         fm.add_command(label="Sync Windows tasks", command=self.on_sync)
         fm.add_command(label="Error Log", command=self.on_open_error_log)
         fm.add_separator()
@@ -226,6 +226,35 @@ class App(tk.Tk):
         ):
             self.refresh_lists()
 
+    def on_load_options(self) -> None:
+        reload_now = messagebox.askyesno(
+            "Load options",
+            "Reload options from config.json now?\n\nAny unsaved changes will be discarded.",
+            parent=self,
+        )
+        if not reload_now:
+            return
+        self.cfg = load_config()
+        self.refresh_lists()
+        messagebox.showinfo("Load options", "Options reloaded from config.json.", parent=self)
+
+    def on_reset_options(self) -> None:
+        confirm = messagebox.askyesno(
+            "Reset options",
+            "Reset all options to defaults?\n\nThis will clear all sources and jobs.",
+            parent=self,
+        )
+        if not confirm:
+            return
+        self.cfg = AppConfig()
+        if self.persist_and_sync(
+            parent=self,
+            show_success=True,
+            success_title="Reset options",
+            success_message="Options were reset and tasks were synced.",
+        ):
+            self.refresh_lists()
+
     def on_sync(self) -> None:
         self.persist_and_sync(
             parent=self,
@@ -305,7 +334,6 @@ class App(tk.Tk):
 
     def _maybe_prompt_install_dependencies(self) -> None:
         self._maybe_prompt_install_ffmpeg()
-        self._maybe_prompt_install_postprocess_tools()
 
     def _has_ffmpeg_bundle(self) -> bool:
         return ffmpeg_exe().is_file() and ffprobe_exe().is_file()
@@ -331,43 +359,6 @@ class App(tk.Tk):
         def worker() -> None:
             ok, msg = self._install_ffmpeg_via_powershell()
             self.after(0, lambda: self._on_ffmpeg_install_done(ok, msg))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _maybe_prompt_install_postprocess_tools(self) -> None:
-        if resolve_mythcommflag_exe() is not None:
-            return
-        yes = messagebox.askyesno(
-            "mythcommflag missing",
-            "Commercial removal now uses MythTV mythcommflag.\n\n"
-            "Would you like to install mythcommflag now?",
-            parent=self,
-        )
-        if not yes:
-            return
-        tool_path = filedialog.askopenfilename(
-            title="Select mythcommflag executable or ZIP",
-            filetypes=[
-                ("Executable or ZIP", "*.exe *.zip"),
-                ("Executable", "*.exe"),
-                ("ZIP", "*.zip"),
-                ("All files", "*.*"),
-            ],
-            parent=self,
-        )
-        if not tool_path:
-            messagebox.showwarning(
-                "mythcommflag not installed",
-                "No mythcommflag executable/ZIP was selected.\n\n"
-                "Commercial removal will remain unavailable until mythcommflag is installed.",
-                parent=self,
-            )
-            return
-
-        def worker() -> None:
-            ok, msg = self._install_mythcommflag_via_powershell(Path(tool_path))
-            details = [] if ok else [msg]
-            self.after(0, lambda: self._on_postprocess_install_done(ok, details))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -429,43 +420,6 @@ class App(tk.Tk):
                 f"Details:\n{msg}",
                 parent=self,
             )
-
-    def _install_mythcommflag_via_powershell(self, selected_path: Path) -> tuple[bool, str]:
-        root = project_root()
-        script = root / "scripts" / "setup_mythcommflag.ps1"
-        if not script.is_file():
-            return False, f"missing installer script: {script}"
-        if not selected_path.is_file():
-            return False, f"selected path does not exist: {selected_path}"
-        cmd = [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(script),
-        ]
-        if selected_path.suffix.lower() == ".zip":
-            cmd.extend(["-ZipPath", str(selected_path)])
-        else:
-            cmd.extend(["-ExePath", str(selected_path)])
-        r = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=str(root))
-        if r.returncode == 0 and resolve_mythcommflag_exe() is not None:
-            return True, (r.stdout or "").strip()
-        msg = (r.stderr or r.stdout or "").strip()
-        return False, msg or f"installer exited with code {r.returncode}"
-
-    def _on_postprocess_install_done(self, ok: bool, details: list[str]) -> None:
-        if ok:
-            messagebox.showinfo("Tools install", "mythcommflag is ready.", parent=self)
-            return
-        detail_text = "\n".join(details) if details else "Unknown installation error."
-        messagebox.showerror(
-            "Tools install failed",
-            "mythcommflag installation failed.\n\n"
-            f"{detail_text}",
-            parent=self,
-        )
 
     def selected_source(self) -> Source | None:
         sel = self.src_tree.selection()
@@ -753,92 +707,8 @@ class JobEditor(tk.Toplevel):
             state="readonly",
         ).pack(side=tk.LEFT, padx=6)
 
-        self.remove_commercials_v = tk.BooleanVar(value=job.remove_commercials_after_complete if job else False)
-        ttk.Checkbutton(
-            f,
-            text="Remove Commercials after Complete",
-            variable=self.remove_commercials_v,
-        ).grid(row=10, column=1, sticky=tk.W, pady=2)
-
-        settings = job.commercial_settings if (job and hasattr(job, "commercial_settings")) else CommercialRemovalSettings()
-        hybrid_fr = ttk.LabelFrame(f, text="Commercial Removal Strategy", padding=6)
-        hybrid_fr.grid(row=11, column=1, sticky=tk.W, pady=4)
-
-        self.strategy_v = tk.StringVar(value=settings.strategy)
-        ttk.Label(hybrid_fr, text="Mode").grid(row=0, column=0, sticky=tk.W)
-        ttk.Combobox(
-            hybrid_fr,
-            textvariable=self.strategy_v,
-            values=["myth_only", "legacy_only", "hybrid"],
-            width=18,
-            state="readonly",
-        ).grid(row=0, column=1, sticky=tk.W, padx=6)
-
-        self.enable_myth_v = tk.BooleanVar(value=settings.enable_myth)
-        self.enable_legacy_v = tk.BooleanVar(value=settings.enable_legacy)
-        self.enable_ffmpeg_signals_v = tk.BooleanVar(value=settings.enable_ffmpeg_signals)
-        ttk.Checkbutton(hybrid_fr, text="Enable Myth", variable=self.enable_myth_v).grid(row=1, column=0, sticky=tk.W)
-        ttk.Checkbutton(hybrid_fr, text="Enable Legacy", variable=self.enable_legacy_v).grid(row=1, column=1, sticky=tk.W)
-        ttk.Checkbutton(hybrid_fr, text="Enable FFmpeg Signals", variable=self.enable_ffmpeg_signals_v).grid(
-            row=1,
-            column=2,
-            sticky=tk.W,
-            padx=(8, 0),
-        )
-
-        self.weight_myth_v = tk.StringVar(value=f"{settings.weight_myth:.2f}")
-        self.weight_legacy_v = tk.StringVar(value=f"{settings.weight_legacy:.2f}")
-        self.weight_ffmpeg_v = tk.StringVar(value=f"{settings.weight_ffmpeg_signals:.2f}")
-        ttk.Label(hybrid_fr, text="Weight Myth").grid(row=2, column=0, sticky=tk.W)
-        ttk.Entry(hybrid_fr, textvariable=self.weight_myth_v, width=6).grid(row=2, column=1, sticky=tk.W)
-        ttk.Label(hybrid_fr, text="Legacy").grid(row=2, column=2, sticky=tk.W, padx=(8, 0))
-        ttk.Entry(hybrid_fr, textvariable=self.weight_legacy_v, width=6).grid(row=2, column=3, sticky=tk.W)
-        ttk.Label(hybrid_fr, text="Signals").grid(row=2, column=4, sticky=tk.W, padx=(8, 0))
-        ttk.Entry(hybrid_fr, textvariable=self.weight_ffmpeg_v, width=6).grid(row=2, column=5, sticky=tk.W)
-
-        self.confidence_threshold_v = tk.StringVar(value=f"{settings.confidence_threshold:.2f}")
-        self.max_ratio_v = tk.StringVar(value=f"{settings.max_commercial_ratio:.2f}")
-        self.min_keep_v = tk.StringVar(value=f"{settings.min_keep_segment_seconds:.1f}")
-        ttk.Label(hybrid_fr, text="Confidence >= ").grid(row=3, column=0, sticky=tk.W)
-        ttk.Entry(hybrid_fr, textvariable=self.confidence_threshold_v, width=6).grid(row=3, column=1, sticky=tk.W)
-        ttk.Label(hybrid_fr, text="Max removed ratio").grid(row=3, column=2, sticky=tk.W, padx=(8, 0))
-        ttk.Entry(hybrid_fr, textvariable=self.max_ratio_v, width=6).grid(row=3, column=3, sticky=tk.W)
-        ttk.Label(hybrid_fr, text="Min keep sec").grid(row=3, column=4, sticky=tk.W, padx=(8, 0))
-        ttk.Entry(hybrid_fr, textvariable=self.min_keep_v, width=6).grid(row=3, column=5, sticky=tk.W)
-
-        self.episode_aware_v = tk.BooleanVar(value=settings.episode_aware)
-        ttk.Checkbutton(hybrid_fr, text="Episode-aware segmentation", variable=self.episode_aware_v).grid(
-            row=4,
-            column=0,
-            columnspan=2,
-            sticky=tk.W,
-            pady=(2, 0),
-        )
-        self.boundary_gap_v = tk.StringVar(value=f"{settings.episode_boundary_min_gap_seconds:.1f}")
-        self.boundary_black_v = tk.StringVar(value=f"{settings.episode_boundary_black_min_seconds:.1f}")
-        self.boundary_silence_v = tk.StringVar(value=f"{settings.episode_boundary_silence_min_seconds:.1f}")
-        ttk.Label(hybrid_fr, text="Episode min gap").grid(row=5, column=0, sticky=tk.W)
-        ttk.Entry(hybrid_fr, textvariable=self.boundary_gap_v, width=6).grid(row=5, column=1, sticky=tk.W)
-        ttk.Label(hybrid_fr, text="Black min").grid(row=5, column=2, sticky=tk.W, padx=(8, 0))
-        ttk.Entry(hybrid_fr, textvariable=self.boundary_black_v, width=6).grid(row=5, column=3, sticky=tk.W)
-        ttk.Label(hybrid_fr, text="Silence min").grid(row=5, column=4, sticky=tk.W, padx=(8, 0))
-        ttk.Entry(hybrid_fr, textvariable=self.boundary_silence_v, width=6).grid(row=5, column=5, sticky=tk.W)
-
-        self.fail_safe_mode_v = tk.StringVar(value=settings.fail_safe_mode)
-        self.low_risk_ratio_v = tk.StringVar(value=f"{settings.low_risk_max_commercial_ratio:.2f}")
-        ttk.Label(hybrid_fr, text="Fail-safe").grid(row=6, column=0, sticky=tk.W)
-        ttk.Combobox(
-            hybrid_fr,
-            textvariable=self.fail_safe_mode_v,
-            values=["low_risk_cut", "no_cut"],
-            width=14,
-            state="readonly",
-        ).grid(row=6, column=1, sticky=tk.W)
-        ttk.Label(hybrid_fr, text="Low-risk max ratio").grid(row=6, column=2, sticky=tk.W, padx=(8, 0))
-        ttk.Entry(hybrid_fr, textvariable=self.low_risk_ratio_v, width=6).grid(row=6, column=3, sticky=tk.W)
-
         bf = ttk.Frame(f)
-        bf.grid(row=12, column=0, columnspan=2, pady=12)
+        bf.grid(row=10, column=0, columnspan=2, pady=12)
         ttk.Button(bf, text="Save job", command=self.save).pack(side=tk.LEFT, padx=4)
         ttk.Button(bf, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=4)
 
@@ -919,21 +789,6 @@ class JobEditor(tk.Toplevel):
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             messagebox.showerror("Schedule", "Hour 0–23, minute 0–59.", parent=self)
             return
-        try:
-            weight_myth = float(self.weight_myth_v.get())
-            weight_legacy = float(self.weight_legacy_v.get())
-            weight_ffmpeg = float(self.weight_ffmpeg_v.get())
-            confidence_threshold = float(self.confidence_threshold_v.get())
-            max_ratio = float(self.max_ratio_v.get())
-            min_keep = float(self.min_keep_v.get())
-            boundary_gap = float(self.boundary_gap_v.get())
-            boundary_black = float(self.boundary_black_v.get())
-            boundary_silence = float(self.boundary_silence_v.get())
-            low_risk_ratio = float(self.low_risk_ratio_v.get())
-        except ValueError:
-            messagebox.showerror("Commercial settings", "Commercial settings must use numeric values.", parent=self)
-            return
-
         if self.job is None:
             j = Job.new(name, sid, ch, self.dur_v.get().strip(), self.out_v.get().strip())
             self.cfg.jobs.append(j)
@@ -953,31 +808,6 @@ class JobEditor(tk.Toplevel):
         j.filename_pattern = f"{base}.{selected_fmt}"
         j.output_format = selected_fmt
         j.enabled = self.en_v.get()
-        j.remove_commercials_after_complete = self.remove_commercials_v.get()
-        strategy = self.strategy_v.get().strip()
-        if strategy not in ("myth_only", "legacy_only", "hybrid"):
-            strategy = "myth_only"
-        fail_safe_mode = self.fail_safe_mode_v.get().strip()
-        if fail_safe_mode not in ("low_risk_cut", "no_cut"):
-            fail_safe_mode = "low_risk_cut"
-        j.commercial_settings = CommercialRemovalSettings(
-            strategy=strategy,  # type: ignore[arg-type]
-            enable_myth=self.enable_myth_v.get(),
-            enable_legacy=self.enable_legacy_v.get(),
-            enable_ffmpeg_signals=self.enable_ffmpeg_signals_v.get(),
-            weight_myth=max(0.0, weight_myth),
-            weight_legacy=max(0.0, weight_legacy),
-            weight_ffmpeg_signals=max(0.0, weight_ffmpeg),
-            confidence_threshold=max(0.0, min(1.0, confidence_threshold)),
-            max_commercial_ratio=max(0.0, min(0.95, max_ratio)),
-            min_keep_segment_seconds=max(0.0, min_keep),
-            episode_aware=self.episode_aware_v.get(),
-            episode_boundary_min_gap_seconds=max(15.0, boundary_gap),
-            episode_boundary_black_min_seconds=max(0.1, boundary_black),
-            episode_boundary_silence_min_seconds=max(0.1, boundary_silence),
-            fail_safe_mode=fail_safe_mode,  # type: ignore[arg-type]
-            low_risk_max_commercial_ratio=max(0.0, min(0.95, low_risk_ratio)),
-        )
         j.schedule.mode = "daily" if mode == "daily" else "weekly"
         j.schedule.days = [] if mode == "daily" else days
         j.schedule.hour = hour
