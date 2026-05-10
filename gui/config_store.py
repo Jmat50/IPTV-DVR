@@ -13,6 +13,8 @@ from paths import config_file
 
 ScheduleMode = Literal["daily", "weekly"]
 OutputFormat = Literal["ts", "mp4", "mkv", "mov"]
+CommercialStrategy = Literal["myth_only", "legacy_only", "hybrid"]
+FailSafeMode = Literal["no_cut", "low_risk_cut"]
 
 
 @dataclass
@@ -35,6 +37,26 @@ class Schedule:
 
 
 @dataclass
+class CommercialRemovalSettings:
+    strategy: CommercialStrategy = "myth_only"
+    enable_myth: bool = True
+    enable_legacy: bool = False
+    enable_ffmpeg_signals: bool = True
+    weight_myth: float = 1.0
+    weight_legacy: float = 1.0
+    weight_ffmpeg_signals: float = 0.6
+    confidence_threshold: float = 0.55
+    max_commercial_ratio: float = 0.45
+    min_keep_segment_seconds: float = 15.0
+    episode_aware: bool = True
+    episode_boundary_min_gap_seconds: float = 90.0
+    episode_boundary_black_min_seconds: float = 2.0
+    episode_boundary_silence_min_seconds: float = 1.5
+    fail_safe_mode: FailSafeMode = "low_risk_cut"
+    low_risk_max_commercial_ratio: float = 0.30
+
+
+@dataclass
 class Job:
     id: str
     name: str
@@ -48,6 +70,7 @@ class Job:
     referer: str = ""
     enabled: bool = True
     remove_commercials_after_complete: bool = False
+    commercial_settings: CommercialRemovalSettings = field(default_factory=CommercialRemovalSettings)
     schedule: Schedule = field(default_factory=Schedule)
 
     @staticmethod
@@ -87,11 +110,49 @@ def _schedule_from_dict(d: dict[str, Any]) -> Schedule:
     )
 
 
+def _commercial_settings_from_dict(d: dict[str, Any]) -> CommercialRemovalSettings:
+    strategy = str(d.get("strategy", "myth_only")).lower()
+    if strategy not in ("myth_only", "legacy_only", "hybrid"):
+        strategy = "myth_only"
+    fail_safe_mode = str(d.get("fail_safe_mode", "low_risk_cut")).lower()
+    if fail_safe_mode not in ("no_cut", "low_risk_cut"):
+        fail_safe_mode = "low_risk_cut"
+    return CommercialRemovalSettings(
+        strategy=strategy,  # type: ignore[arg-type]
+        enable_myth=bool(d.get("enable_myth", True)),
+        enable_legacy=bool(d.get("enable_legacy", False)),
+        enable_ffmpeg_signals=bool(d.get("enable_ffmpeg_signals", True)),
+        weight_myth=float(d.get("weight_myth", 1.0)),
+        weight_legacy=float(d.get("weight_legacy", 1.0)),
+        weight_ffmpeg_signals=float(d.get("weight_ffmpeg_signals", 0.6)),
+        confidence_threshold=float(d.get("confidence_threshold", 0.55)),
+        max_commercial_ratio=float(d.get("max_commercial_ratio", 0.45)),
+        min_keep_segment_seconds=float(d.get("min_keep_segment_seconds", 15.0)),
+        episode_aware=bool(d.get("episode_aware", True)),
+        episode_boundary_min_gap_seconds=float(d.get("episode_boundary_min_gap_seconds", 90.0)),
+        episode_boundary_black_min_seconds=float(d.get("episode_boundary_black_min_seconds", 2.0)),
+        episode_boundary_silence_min_seconds=float(d.get("episode_boundary_silence_min_seconds", 1.5)),
+        fail_safe_mode=fail_safe_mode,  # type: ignore[arg-type]
+        low_risk_max_commercial_ratio=float(d.get("low_risk_max_commercial_ratio", 0.30)),
+    )
+
+
 def _job_from_dict(d: dict[str, Any]) -> Job:
     sch = d.get("schedule") or {}
     output_format = str(d.get("output_format", "ts")).lower()
     if output_format not in ("ts", "mp4", "mkv", "mov"):
         output_format = "ts"
+    remove_commercials = bool(d.get("remove_commercials_after_complete", False))
+    settings_obj = d.get("commercial_settings")
+    if isinstance(settings_obj, dict):
+        commercial_settings = _commercial_settings_from_dict(settings_obj)
+    else:
+        # Backward-compatible defaults for older config files.
+        commercial_settings = CommercialRemovalSettings()
+        if remove_commercials:
+            commercial_settings.strategy = "hybrid"
+            commercial_settings.enable_myth = True
+            commercial_settings.enable_ffmpeg_signals = True
     return Job(
         id=d["id"],
         name=d.get("name", "Job"),
@@ -104,7 +165,8 @@ def _job_from_dict(d: dict[str, Any]) -> Job:
         user_agent=d.get("user_agent", ""),
         referer=d.get("referer", ""),
         enabled=bool(d.get("enabled", True)),
-        remove_commercials_after_complete=bool(d.get("remove_commercials_after_complete", False)),
+        remove_commercials_after_complete=remove_commercials,
+        commercial_settings=commercial_settings,
         schedule=_schedule_from_dict(sch) if isinstance(sch, dict) else Schedule(),
     )
 

@@ -80,4 +80,8 @@ def run_job(job_id: str) -> int:
     if not post.success:
         print(f"post-processing failed: {post.message}; see {log_path}", file=sys.stderr)
         return post.exit_code
+    if getattr(job, "remove_commercials_after_complete", False):
+        settings = getattr(job, "commercial_settings", None)
+        strategy = getattr(settings, "strategy", "myth_only")
+        print(f"post-processing strategy: {strategy}; output: {post.output_path}")
     return 0

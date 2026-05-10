@@ -1,17 +1,17 @@
 # Build standalone Windows GUI: gui\iptv-gui.exe (PyInstaller onefile + windowed).
 # This script ensures required runtime dependencies are present:
 # - gui\ffmpeg\ffmpeg.exe + gui\ffmpeg\ffprobe.exe
-# - tools\commercialcleaner\CommercialCleaner.exe
-# - tools\comskip\comskip.exe
+# - tools\mythtv\mythcommflag.exe
 # It skips each install when already present unless force switches are passed.
 # Prereqs: Python 3.10+ on PATH (py launcher or python), pip, Internet for pip/pyinstaller and FFmpeg download.
 #
 # Close any running copy of gui\iptv-gui.exe (or an older gui\iptv-recorder.exe) before rebuilding.
 param(
     [switch]$ForceFfmpeg,
-    [switch]$ForceCommercialTools,
-    [string]$ComskipZipPath = "",
-    [string]$ComskipDownloadUrl = ""
+    [switch]$ForceMythCommflag,
+    [string]$MythCommflagExePath = "",
+    [string]$MythCommflagZipPath = "",
+    [string]$MythCommflagDownloadUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,36 +41,28 @@ else {
     Write-Host " - " $BundledFfprobeExe
 }
 
-$CleanerExe = Join-Path $Root "tools\commercialcleaner\CommercialCleaner.exe"
-$CleanerScript = Join-Path $Root "scripts\download_commercial_cleaner.ps1"
-if (-not (Test-Path $CleanerScript)) { throw "Missing $CleanerScript" }
-if ($ForceCommercialTools -or -not (Test-Path $CleanerExe)) {
-    Write-Host "Installing / refreshing CommercialCleaner..."
-    powershell -NoProfile -ExecutionPolicy Bypass -File $CleanerScript
-}
-else {
-    Write-Host "CommercialCleaner already present; skipping download:" $CleanerExe
-}
-
-$ComskipExe = Join-Path $Root "tools\comskip\comskip.exe"
-$ComskipScript = Join-Path $Root "scripts\setup_comskip.ps1"
-if (-not (Test-Path $ComskipScript)) { throw "Missing $ComskipScript" }
-if ($ForceCommercialTools -or -not (Test-Path $ComskipExe)) {
-    Write-Host "Installing / refreshing Comskip..."
-    $ComskipArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ComskipScript)
-    if (-not [string]::IsNullOrWhiteSpace($ComskipZipPath)) {
-        $ComskipArgs += @("-ZipPath", $ComskipZipPath)
+$MythCommflagExe = Join-Path $Root "tools\mythtv\mythcommflag.exe"
+$MythCommflagScript = Join-Path $Root "scripts\setup_mythcommflag.ps1"
+if (-not (Test-Path $MythCommflagScript)) { throw "Missing $MythCommflagScript" }
+if ($ForceMythCommflag -or -not (Test-Path $MythCommflagExe)) {
+    Write-Host "Installing / refreshing mythcommflag..."
+    $MythArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $MythCommflagScript)
+    if (-not [string]::IsNullOrWhiteSpace($MythCommflagExePath)) {
+        $MythArgs += @("-ExePath", $MythCommflagExePath)
     }
-    elseif (-not [string]::IsNullOrWhiteSpace($ComskipDownloadUrl)) {
-        $ComskipArgs += @("-DownloadUrl", $ComskipDownloadUrl)
+    elseif (-not [string]::IsNullOrWhiteSpace($MythCommflagZipPath)) {
+        $MythArgs += @("-ZipPath", $MythCommflagZipPath)
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($MythCommflagDownloadUrl)) {
+        $MythArgs += @("-DownloadUrl", $MythCommflagDownloadUrl)
     }
     else {
-        throw "Comskip is missing. Provide -ComskipZipPath <zip> or -ComskipDownloadUrl <url>."
+        throw "mythcommflag is missing. Provide -MythCommflagExePath <exe>, -MythCommflagZipPath <zip>, or -MythCommflagDownloadUrl <url>."
     }
-    powershell @ComskipArgs
+    powershell @MythArgs
 }
 else {
-    Write-Host "Comskip already present; skipping install:" $ComskipExe
+    Write-Host "mythcommflag already present; skipping install:" $MythCommflagExe
 }
 
 $Main = Join-Path $Root "gui\main.py"

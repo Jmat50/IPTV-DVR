@@ -56,29 +56,18 @@ def _tool_path_candidates(*parts: str) -> list[Path]:
     return candidates
 
 
-def comskip_exe() -> Path:
-    return _tool_path_candidates("comskip", "comskip.exe")[0]
+def mythcommflag_exe() -> Path:
+    return _tool_path_candidates("mythtv", "mythcommflag.exe")[0]
 
 
-def comskip_ini() -> Path:
-    return _tool_path_candidates("comskip", "comskip.ini")[0]
-
-
-def commercial_cleaner_exe() -> Path:
-    return _tool_path_candidates("commercialcleaner", "CommercialCleaner.exe")[0]
-
-
-def resolve_comskip_exe() -> Path | None:
-    for p in _tool_path_candidates("comskip", "comskip.exe"):
+def resolve_mythcommflag_exe() -> Path | None:
+    for p in _tool_path_candidates("mythtv", "mythcommflag_compat.exe"):
         if p.is_file():
             return p
-    on_path = which("comskip")
-    return Path(on_path) if on_path else None
-
-
-def resolve_commercial_cleaner_exe() -> Path | None:
-    for p in _tool_path_candidates("commercialcleaner", "CommercialCleaner.exe"):
+    for p in _tool_path_candidates("mythtv", "mythcommflag.exe"):
         if p.is_file():
             return p
-    on_path = which("CommercialCleaner")
+    on_path = which("mythcommflag")
+    if not on_path:
+        on_path = which("mythcommflag.exe")
     return Path(on_path) if on_path else None

@@ -129,11 +129,16 @@ def sync_all_tasks(
     """
     enabled = [j for j in jobs if j.enabled]
     want = {task_name_for_job(j.id) for j in enabled}
+    running = set(list_running_app_tasks())
     for existing in list_app_tasks():
         if existing not in want:
+            if existing in running:
+                continue
             delete_task(existing)
     errors: list[str] = []
     for j in enabled:
+        if task_name_for_job(j.id) in running:
+            continue
         if frozen_main:
             arg = f"run-job --job-id {j.id}"
         else:

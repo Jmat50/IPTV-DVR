@@ -8,6 +8,7 @@ Frozen exe:                 iptv-gui.exe run-job --job-id <uuid>
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import tempfile
@@ -16,9 +17,18 @@ import traceback
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
-from config_store import AppConfig, Job, Source, job_by_id, load_config, save_config, source_by_id
+from config_store import (
+    AppConfig,
+    CommercialRemovalSettings,
+    Job,
+    Source,
+    job_by_id,
+    load_config,
+    save_config,
+    source_by_id,
+)
 from duration_parse import parse_duration
 from job_runner import run_job
 from m3u_load import load_m3u
@@ -28,11 +38,10 @@ from paths import (
     is_frozen,
     log_dir,
     project_root,
-    resolve_commercial_cleaner_exe,
-    resolve_comskip_exe,
+    resolve_mythcommflag_exe,
 )
 from recorder import build_ffmpeg_argv, run_ffmpeg
-from scheduler_win import list_running_app_tasks, sync_all_tasks
+from scheduler_win import sync_all_tasks
 
 
 def _python_for_tasks() -> Path:
@@ -95,7 +104,6 @@ class App(tk.Tk):
         super().__init__()
         self.title("IPTV Recorder (local)")
         self.cfg: AppConfig = load_config()
-        self._warned_close_skip_sync = False
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.report_callback_exception = self.on_tk_callback_exception
 
@@ -254,29 +262,15 @@ class App(tk.Tk):
         return True
 
     def on_close(self) -> None:
-        # Avoid task re-registration while recordings are active.
-        running = list_running_app_tasks()
-        if running:
-            save_config(self.cfg)
-            if not self._warned_close_skip_sync:
-                self._warned_close_skip_sync = True
-                messagebox.showinfo(
-                    "Recording in progress",
-                    "A scheduled recording is currently running.\n\n"
-                    "Configuration was saved, but task sync was skipped while closing "
-                    "to avoid interrupting active recordings.",
-                    parent=self,
-                )
-        else:
-            if not self.persist_and_sync(parent=self):
-                leave_anyway = messagebox.askyesno(
-                    "Exit with unsynced tasks?",
-                    "Task sync failed while closing.\n\nExit anyway?\n"
-                    "If you exit now, scheduled recordings may not run as expected.",
-                    parent=self,
-                )
-                if not leave_anyway:
-                    return
+        if not self.persist_and_sync(parent=self):
+            leave_anyway = messagebox.askyesno(
+                "Exit with unsynced tasks?",
+                "Task sync failed while closing.\n\nExit anyway?\n"
+                "If you exit now, scheduled recordings may not run as expected.",
+                parent=self,
+            )
+            if not leave_anyway:
+                return
         self.destroy()
 
     def on_ffmpeg_status(self) -> None:
@@ -341,57 +335,38 @@ class App(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _maybe_prompt_install_postprocess_tools(self) -> None:
-        missing: list[str] = []
-        if resolve_commercial_cleaner_exe() is None:
-            missing.append("CommercialCleaner")
-        if resolve_comskip_exe() is None:
-            missing.append("Comskip")
-        if not missing:
+        if resolve_mythcommflag_exe() is not None:
             return
         yes = messagebox.askyesno(
-            "Post-processing tools missing",
-            "Commercial removal requires additional tools.\n\n"
-            f"Missing: {', '.join(missing)}\n\n"
-            "Would you like to install missing tools now?",
+            "mythcommflag missing",
+            "Commercial removal now uses MythTV mythcommflag.\n\n"
+            "Would you like to install mythcommflag now?",
             parent=self,
         )
         if not yes:
             return
-
-        comskip_zip: Path | None = None
-        if "Comskip" in missing:
-            zip_path = filedialog.askopenfilename(
-                title="Select Comskip ZIP",
-                filetypes=[("ZIP files", "*.zip"), ("All files", "*.*")],
+        tool_path = filedialog.askopenfilename(
+            title="Select mythcommflag executable or ZIP",
+            filetypes=[
+                ("Executable or ZIP", "*.exe *.zip"),
+                ("Executable", "*.exe"),
+                ("ZIP", "*.zip"),
+                ("All files", "*.*"),
+            ],
+            parent=self,
+        )
+        if not tool_path:
+            messagebox.showwarning(
+                "mythcommflag not installed",
+                "No mythcommflag executable/ZIP was selected.\n\n"
+                "Commercial removal will remain unavailable until mythcommflag is installed.",
                 parent=self,
             )
-            if not zip_path:
-                messagebox.showwarning(
-                    "Comskip not installed",
-                    "Comskip ZIP was not selected.\n\n"
-                    "Commercial removal will remain unavailable until Comskip is installed.",
-                    parent=self,
-                )
-                missing = [m for m in missing if m != "Comskip"]
-            else:
-                comskip_zip = Path(zip_path)
-
-        if not missing:
             return
 
         def worker() -> None:
-            ok = True
-            details: list[str] = []
-            if "CommercialCleaner" in missing:
-                cc_ok, cc_msg = self._install_commercial_cleaner_via_powershell()
-                ok = ok and cc_ok
-                if not cc_ok:
-                    details.append(f"CommercialCleaner: {cc_msg}")
-            if "Comskip" in missing and comskip_zip is not None:
-                cs_ok, cs_msg = self._install_comskip_via_powershell(comskip_zip)
-                ok = ok and cs_ok
-                if not cs_ok:
-                    details.append(f"Comskip: {cs_msg}")
+            ok, msg = self._install_mythcommflag_via_powershell(Path(tool_path))
+            details = [] if ok else [msg]
             self.after(0, lambda: self._on_postprocess_install_done(ok, details))
 
         threading.Thread(target=worker, daemon=True).start()
@@ -455,11 +430,13 @@ class App(tk.Tk):
                 parent=self,
             )
 
-    def _install_commercial_cleaner_via_powershell(self) -> tuple[bool, str]:
+    def _install_mythcommflag_via_powershell(self, selected_path: Path) -> tuple[bool, str]:
         root = project_root()
-        script = root / "scripts" / "download_commercial_cleaner.ps1"
+        script = root / "scripts" / "setup_mythcommflag.ps1"
         if not script.is_file():
             return False, f"missing installer script: {script}"
+        if not selected_path.is_file():
+            return False, f"selected path does not exist: {selected_path}"
         cmd = [
             "powershell.exe",
             "-NoProfile",
@@ -468,41 +445,24 @@ class App(tk.Tk):
             "-File",
             str(script),
         ]
+        if selected_path.suffix.lower() == ".zip":
+            cmd.extend(["-ZipPath", str(selected_path)])
+        else:
+            cmd.extend(["-ExePath", str(selected_path)])
         r = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=str(root))
-        if r.returncode == 0 and resolve_commercial_cleaner_exe() is not None:
-            return True, (r.stdout or "").strip()
-        msg = (r.stderr or r.stdout or "").strip()
-        return False, msg or f"installer exited with code {r.returncode}"
-
-    def _install_comskip_via_powershell(self, zip_path: Path) -> tuple[bool, str]:
-        root = project_root()
-        script = root / "scripts" / "setup_comskip.ps1"
-        if not script.is_file():
-            return False, f"missing installer script: {script}"
-        cmd = [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(script),
-            "-ZipPath",
-            str(zip_path),
-        ]
-        r = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=str(root))
-        if r.returncode == 0 and resolve_comskip_exe() is not None:
+        if r.returncode == 0 and resolve_mythcommflag_exe() is not None:
             return True, (r.stdout or "").strip()
         msg = (r.stderr or r.stdout or "").strip()
         return False, msg or f"installer exited with code {r.returncode}"
 
     def _on_postprocess_install_done(self, ok: bool, details: list[str]) -> None:
         if ok:
-            messagebox.showinfo("Tools install", "Post-processing tools are ready.", parent=self)
+            messagebox.showinfo("Tools install", "mythcommflag is ready.", parent=self)
             return
         detail_text = "\n".join(details) if details else "Unknown installation error."
         messagebox.showerror(
             "Tools install failed",
-            "One or more post-processing tools failed to install.\n\n"
+            "mythcommflag installation failed.\n\n"
             f"{detail_text}",
             parent=self,
         )
@@ -520,16 +480,12 @@ class App(tk.Tk):
         return job_by_id(self.cfg, sel[0])
 
     def add_source(self) -> None:
-        name = simpledialog.askstring("Source", "Display name:", parent=self)
-        if not name:
+        editor = SourceEditor(self, title="Add source")
+        self.wait_window(editor)
+        if not editor.result:
             return
-        path = filedialog.askopenfilename(title="M3U file (or Cancel to type URL)", filetypes=[("M3U", "*.m3u"), ("All", "*.*")])
-        if not path:
-            path = simpledialog.askstring("Source", "M3U file path or http(s) URL:", parent=self) or ""
-        path = path.strip()
-        if not path:
-            return
-        self.cfg.sources.append(Source.new(name, path))
+        name, source = editor.result
+        self.cfg.sources.append(Source.new(name, source))
         self.refresh_lists()
 
     def edit_source(self) -> None:
@@ -537,19 +493,11 @@ class App(tk.Tk):
         if not s:
             messagebox.showinfo("Edit", "Select a source first.")
             return
-        name = simpledialog.askstring("Source", "Display name:", initialvalue=s.name, parent=self)
-        if name is None:
+        editor = SourceEditor(self, title="Edit source", name=s.name, source=s.path_or_url)
+        self.wait_window(editor)
+        if not editor.result:
             return
-        path = simpledialog.askstring(
-            "Source",
-            "M3U file path or URL:",
-            initialvalue=s.path_or_url,
-            parent=self,
-        )
-        if path is None:
-            return
-        s.name = name.strip()
-        s.path_or_url = path.strip()
+        s.name, s.path_or_url = editor.result
         self.refresh_lists()
 
     def remove_source(self) -> None:
@@ -621,13 +569,31 @@ class App(tk.Tk):
             "stderr": subprocess.DEVNULL,
             "close_fds": True,
         }
+        env = dict(os.environ)
+        if frozen:
+            # For PyInstaller one-file builds, force a fresh child runtime
+            # environment so the parent can clean up its own _MEI temp dir.
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            env.pop("_MEIPASS2", None)
+        kwargs["env"] = env
         if sys.platform == "win32":
             create_new_process_group = 0x00000200
             detached_process = 0x00000008
-            kwargs["creationflags"] = create_new_process_group | detached_process
+            create_breakaway_from_job = 0x01000000
+            kwargs["creationflags"] = (
+                create_new_process_group | detached_process | create_breakaway_from_job
+            )
         else:
             kwargs["start_new_session"] = True
-        subprocess.Popen(cmd, **kwargs)
+        try:
+            subprocess.Popen(cmd, **kwargs)
+        except OSError:
+            # Fallback if breakaway is blocked by local policy.
+            if sys.platform == "win32":
+                kwargs["creationflags"] = create_new_process_group | detached_process
+                subprocess.Popen(cmd, **kwargs)
+            else:
+                raise
 
     def _on_manual_run_done(self, name: str, code: int) -> None:
         if code == 0:
@@ -794,8 +760,85 @@ class JobEditor(tk.Toplevel):
             variable=self.remove_commercials_v,
         ).grid(row=10, column=1, sticky=tk.W, pady=2)
 
+        settings = job.commercial_settings if (job and hasattr(job, "commercial_settings")) else CommercialRemovalSettings()
+        hybrid_fr = ttk.LabelFrame(f, text="Commercial Removal Strategy", padding=6)
+        hybrid_fr.grid(row=11, column=1, sticky=tk.W, pady=4)
+
+        self.strategy_v = tk.StringVar(value=settings.strategy)
+        ttk.Label(hybrid_fr, text="Mode").grid(row=0, column=0, sticky=tk.W)
+        ttk.Combobox(
+            hybrid_fr,
+            textvariable=self.strategy_v,
+            values=["myth_only", "legacy_only", "hybrid"],
+            width=18,
+            state="readonly",
+        ).grid(row=0, column=1, sticky=tk.W, padx=6)
+
+        self.enable_myth_v = tk.BooleanVar(value=settings.enable_myth)
+        self.enable_legacy_v = tk.BooleanVar(value=settings.enable_legacy)
+        self.enable_ffmpeg_signals_v = tk.BooleanVar(value=settings.enable_ffmpeg_signals)
+        ttk.Checkbutton(hybrid_fr, text="Enable Myth", variable=self.enable_myth_v).grid(row=1, column=0, sticky=tk.W)
+        ttk.Checkbutton(hybrid_fr, text="Enable Legacy", variable=self.enable_legacy_v).grid(row=1, column=1, sticky=tk.W)
+        ttk.Checkbutton(hybrid_fr, text="Enable FFmpeg Signals", variable=self.enable_ffmpeg_signals_v).grid(
+            row=1,
+            column=2,
+            sticky=tk.W,
+            padx=(8, 0),
+        )
+
+        self.weight_myth_v = tk.StringVar(value=f"{settings.weight_myth:.2f}")
+        self.weight_legacy_v = tk.StringVar(value=f"{settings.weight_legacy:.2f}")
+        self.weight_ffmpeg_v = tk.StringVar(value=f"{settings.weight_ffmpeg_signals:.2f}")
+        ttk.Label(hybrid_fr, text="Weight Myth").grid(row=2, column=0, sticky=tk.W)
+        ttk.Entry(hybrid_fr, textvariable=self.weight_myth_v, width=6).grid(row=2, column=1, sticky=tk.W)
+        ttk.Label(hybrid_fr, text="Legacy").grid(row=2, column=2, sticky=tk.W, padx=(8, 0))
+        ttk.Entry(hybrid_fr, textvariable=self.weight_legacy_v, width=6).grid(row=2, column=3, sticky=tk.W)
+        ttk.Label(hybrid_fr, text="Signals").grid(row=2, column=4, sticky=tk.W, padx=(8, 0))
+        ttk.Entry(hybrid_fr, textvariable=self.weight_ffmpeg_v, width=6).grid(row=2, column=5, sticky=tk.W)
+
+        self.confidence_threshold_v = tk.StringVar(value=f"{settings.confidence_threshold:.2f}")
+        self.max_ratio_v = tk.StringVar(value=f"{settings.max_commercial_ratio:.2f}")
+        self.min_keep_v = tk.StringVar(value=f"{settings.min_keep_segment_seconds:.1f}")
+        ttk.Label(hybrid_fr, text="Confidence >= ").grid(row=3, column=0, sticky=tk.W)
+        ttk.Entry(hybrid_fr, textvariable=self.confidence_threshold_v, width=6).grid(row=3, column=1, sticky=tk.W)
+        ttk.Label(hybrid_fr, text="Max removed ratio").grid(row=3, column=2, sticky=tk.W, padx=(8, 0))
+        ttk.Entry(hybrid_fr, textvariable=self.max_ratio_v, width=6).grid(row=3, column=3, sticky=tk.W)
+        ttk.Label(hybrid_fr, text="Min keep sec").grid(row=3, column=4, sticky=tk.W, padx=(8, 0))
+        ttk.Entry(hybrid_fr, textvariable=self.min_keep_v, width=6).grid(row=3, column=5, sticky=tk.W)
+
+        self.episode_aware_v = tk.BooleanVar(value=settings.episode_aware)
+        ttk.Checkbutton(hybrid_fr, text="Episode-aware segmentation", variable=self.episode_aware_v).grid(
+            row=4,
+            column=0,
+            columnspan=2,
+            sticky=tk.W,
+            pady=(2, 0),
+        )
+        self.boundary_gap_v = tk.StringVar(value=f"{settings.episode_boundary_min_gap_seconds:.1f}")
+        self.boundary_black_v = tk.StringVar(value=f"{settings.episode_boundary_black_min_seconds:.1f}")
+        self.boundary_silence_v = tk.StringVar(value=f"{settings.episode_boundary_silence_min_seconds:.1f}")
+        ttk.Label(hybrid_fr, text="Episode min gap").grid(row=5, column=0, sticky=tk.W)
+        ttk.Entry(hybrid_fr, textvariable=self.boundary_gap_v, width=6).grid(row=5, column=1, sticky=tk.W)
+        ttk.Label(hybrid_fr, text="Black min").grid(row=5, column=2, sticky=tk.W, padx=(8, 0))
+        ttk.Entry(hybrid_fr, textvariable=self.boundary_black_v, width=6).grid(row=5, column=3, sticky=tk.W)
+        ttk.Label(hybrid_fr, text="Silence min").grid(row=5, column=4, sticky=tk.W, padx=(8, 0))
+        ttk.Entry(hybrid_fr, textvariable=self.boundary_silence_v, width=6).grid(row=5, column=5, sticky=tk.W)
+
+        self.fail_safe_mode_v = tk.StringVar(value=settings.fail_safe_mode)
+        self.low_risk_ratio_v = tk.StringVar(value=f"{settings.low_risk_max_commercial_ratio:.2f}")
+        ttk.Label(hybrid_fr, text="Fail-safe").grid(row=6, column=0, sticky=tk.W)
+        ttk.Combobox(
+            hybrid_fr,
+            textvariable=self.fail_safe_mode_v,
+            values=["low_risk_cut", "no_cut"],
+            width=14,
+            state="readonly",
+        ).grid(row=6, column=1, sticky=tk.W)
+        ttk.Label(hybrid_fr, text="Low-risk max ratio").grid(row=6, column=2, sticky=tk.W, padx=(8, 0))
+        ttk.Entry(hybrid_fr, textvariable=self.low_risk_ratio_v, width=6).grid(row=6, column=3, sticky=tk.W)
+
         bf = ttk.Frame(f)
-        bf.grid(row=11, column=0, columnspan=2, pady=12)
+        bf.grid(row=12, column=0, columnspan=2, pady=12)
         ttk.Button(bf, text="Save job", command=self.save).pack(side=tk.LEFT, padx=4)
         ttk.Button(bf, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=4)
 
@@ -876,6 +919,20 @@ class JobEditor(tk.Toplevel):
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             messagebox.showerror("Schedule", "Hour 0–23, minute 0–59.", parent=self)
             return
+        try:
+            weight_myth = float(self.weight_myth_v.get())
+            weight_legacy = float(self.weight_legacy_v.get())
+            weight_ffmpeg = float(self.weight_ffmpeg_v.get())
+            confidence_threshold = float(self.confidence_threshold_v.get())
+            max_ratio = float(self.max_ratio_v.get())
+            min_keep = float(self.min_keep_v.get())
+            boundary_gap = float(self.boundary_gap_v.get())
+            boundary_black = float(self.boundary_black_v.get())
+            boundary_silence = float(self.boundary_silence_v.get())
+            low_risk_ratio = float(self.low_risk_ratio_v.get())
+        except ValueError:
+            messagebox.showerror("Commercial settings", "Commercial settings must use numeric values.", parent=self)
+            return
 
         if self.job is None:
             j = Job.new(name, sid, ch, self.dur_v.get().strip(), self.out_v.get().strip())
@@ -897,6 +954,30 @@ class JobEditor(tk.Toplevel):
         j.output_format = selected_fmt
         j.enabled = self.en_v.get()
         j.remove_commercials_after_complete = self.remove_commercials_v.get()
+        strategy = self.strategy_v.get().strip()
+        if strategy not in ("myth_only", "legacy_only", "hybrid"):
+            strategy = "myth_only"
+        fail_safe_mode = self.fail_safe_mode_v.get().strip()
+        if fail_safe_mode not in ("low_risk_cut", "no_cut"):
+            fail_safe_mode = "low_risk_cut"
+        j.commercial_settings = CommercialRemovalSettings(
+            strategy=strategy,  # type: ignore[arg-type]
+            enable_myth=self.enable_myth_v.get(),
+            enable_legacy=self.enable_legacy_v.get(),
+            enable_ffmpeg_signals=self.enable_ffmpeg_signals_v.get(),
+            weight_myth=max(0.0, weight_myth),
+            weight_legacy=max(0.0, weight_legacy),
+            weight_ffmpeg_signals=max(0.0, weight_ffmpeg),
+            confidence_threshold=max(0.0, min(1.0, confidence_threshold)),
+            max_commercial_ratio=max(0.0, min(0.95, max_ratio)),
+            min_keep_segment_seconds=max(0.0, min_keep),
+            episode_aware=self.episode_aware_v.get(),
+            episode_boundary_min_gap_seconds=max(15.0, boundary_gap),
+            episode_boundary_black_min_seconds=max(0.1, boundary_black),
+            episode_boundary_silence_min_seconds=max(0.1, boundary_silence),
+            fail_safe_mode=fail_safe_mode,  # type: ignore[arg-type]
+            low_risk_max_commercial_ratio=max(0.0, min(0.95, low_risk_ratio)),
+        )
         j.schedule.mode = "daily" if mode == "daily" else "weekly"
         j.schedule.days = [] if mode == "daily" else days
         j.schedule.hour = hour
@@ -905,6 +986,70 @@ class JobEditor(tk.Toplevel):
         if not self.master.persist_and_sync(parent=self):
             return
         self._on_done()
+        self.destroy()
+
+
+class SourceEditor(tk.Toplevel):
+    def __init__(self, parent: tk.Misc, *, title: str, name: str = "", source: str = "") -> None:
+        super().__init__(parent)
+        self.title(title)
+        self.transient(parent)
+        self.grab_set()
+        self.resizable(False, False)
+        self.result: tuple[str, str] | None = None
+
+        root = ttk.Frame(self, padding=10)
+        root.grid(row=0, column=0, sticky="nsew")
+        self.grid_columnconfigure(0, weight=1)
+        root.grid_columnconfigure(1, weight=1)
+
+        ttk.Label(root, text="Name").grid(row=0, column=0, sticky=tk.W, pady=(0, 6))
+        self.name_v = tk.StringVar(value=name)
+        name_entry = ttk.Entry(root, textvariable=self.name_v, width=48)
+        name_entry.grid(row=0, column=1, sticky="ew", pady=(0, 6))
+
+        ttk.Label(root, text="Source").grid(row=1, column=0, sticky=tk.W)
+        src_fr = ttk.Frame(root)
+        src_fr.grid(row=1, column=1, sticky="ew")
+        src_fr.grid_columnconfigure(0, weight=1)
+        self.source_v = tk.StringVar(value=source)
+        src_entry = ttk.Entry(src_fr, textvariable=self.source_v, width=48)
+        src_entry.grid(row=0, column=0, sticky="ew")
+        ttk.Button(src_fr, text="Browse…", command=self._browse_source).grid(row=0, column=1, padx=(6, 0))
+        ttk.Label(
+            root,
+            text="Enter local .m3u path or http(s) URL.",
+            font=("TkDefaultFont", 8),
+        ).grid(row=2, column=1, sticky=tk.W, pady=(4, 0))
+
+        btns = ttk.Frame(root)
+        btns.grid(row=3, column=0, columnspan=2, sticky=tk.E, pady=(12, 0))
+        ttk.Button(btns, text="Save", command=self._save).pack(side=tk.LEFT)
+        ttk.Button(btns, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=(6, 0))
+
+        self.bind("<Return>", lambda _e: self._save())
+        self.bind("<Escape>", lambda _e: self.destroy())
+        name_entry.focus_set()
+
+    def _browse_source(self) -> None:
+        selected = filedialog.askopenfilename(
+            title="Select M3U source file",
+            filetypes=[("M3U", "*.m3u"), ("All files", "*.*")],
+            parent=self,
+        )
+        if selected:
+            self.source_v.set(selected)
+
+    def _save(self) -> None:
+        name = self.name_v.get().strip()
+        source = self.source_v.get().strip()
+        if not name:
+            messagebox.showerror("Source", "Name is required.", parent=self)
+            return
+        if not source:
+            messagebox.showerror("Source", "Source is required.", parent=self)
+            return
+        self.result = (name, source)
         self.destroy()
 
 

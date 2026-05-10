@@ -120,14 +120,6 @@ def build_ffmpeg_argv(
         "-hide_banner",
         "-loglevel",
         "warning",
-        "-reconnect",
-        "1",
-        "-reconnect_streamed",
-        "1",
-        "-reconnect_at_eof",
-        "1",
-        "-reconnect_delay_max",
-        "5",
     ]
     if user_agent:
         args += ["-user_agent", user_agent]
@@ -136,6 +128,10 @@ def build_ffmpeg_argv(
     args += [
         "-i",
         stream_url,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
         "-c",
         "copy",
         "-t",

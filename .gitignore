@@ -7,7 +7,7 @@ config.json
 logs/
 gui/ffmpeg/ffmpeg.exe
 gui/ffmpeg/ffprobe.exe
-tools/commercialcleaner/CommercialCleaner.exe
+tools/mythtv/mythcommflag.exe
 gui/build/
 gui/_dist_stage/
 gui/iptv-recorder.spec
@@ -15,3 +15,5 @@ gui/iptv-gui.spec
 gui/iptv-gui.exe
 gui/iptv-recorder.exe
 gui/iptv-recorder-built.exe
+__pycache__/
+*.pyc

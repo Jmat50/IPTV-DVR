@@ -22,28 +22,26 @@ Two recurring job options are available in the GUI:
 When commercial removal is enabled, the pipeline is:
 
 1. Record stream directly to the selected output format
-2. Generate `.edl` using Comskip
-3. Run CommercialCleaner to produce `*_clean.mkv`
+2. Run MythTV `mythcommflag` to detect commercial frame boundaries
+3. Use FFmpeg to cut flagged commercial spans and produce `*_clean.(mkv|mp4)`
 
 The original recording is never overwritten.
 
 Set up dependencies:
 
 ```powershell
-# CommercialCleaner binary
-powershell -ExecutionPolicy Bypass -File .\scripts\download_commercial_cleaner.ps1
+# mythcommflag from an existing executable
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_mythcommflag.ps1 -ExePath "C:\path\mythcommflag.exe"
 
-# Comskip from a local zip
-powershell -ExecutionPolicy Bypass -File .\scripts\setup_comskip.ps1 -ZipPath "C:\Downloads\comskip.zip"
+# or mythcommflag from a zip archive
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_mythcommflag.ps1 -ZipPath "C:\Downloads\mythcommflag.zip"
 ```
 
 Expected paths:
 
-- `tools\commercialcleaner\CommercialCleaner.exe`
-- `tools\comskip\comskip.exe`
-- optional: `tools\comskip\comskip.ini`
+- `tools\mythtv\mythcommflag.exe`
 
-If installed elsewhere, `comskip` and `CommercialCleaner` are also resolved from `PATH`.
+If installed elsewhere, `mythcommflag` is also resolved from `PATH`.
 
 ## Build standalone GUI (`gui\iptv-gui.exe`)
 
@@ -73,7 +71,7 @@ iptv-gui.exe run-job --job-id <uuid>
 - Add / edit / remove **M3U sources** (local file or `http(s)` URL).
 - Define **recording jobs**: channel name, duration (`90m`, `1h30m`, …), output folder, filename pattern (`{date}`, `{time}`, `{channel}`), output format (`ts`, `mp4`, `mkv`, `mov`).
 - Optional post-processing on each job:
-  - **Remove Commercials after Complete** (uses Comskip + CommercialCleaner and creates a new cleaned file)
+  - **Remove Commercials after Complete** (uses `mythcommflag` + FFmpeg and creates a new cleaned file)
 - **Daily** or **weekly** (weekday checkboxes) at a wall-clock time.
 - **Save config** writes `config.json` (next to the app: repo root when using `python gui\main.py`, or the `gui\` folder when using `iptv-gui.exe`). **Sync Windows tasks** registers recurring tasks that run either  
   `pythonw.exe "…\gui\main.py" run-job --job-id <uuid>` (dev) or  
