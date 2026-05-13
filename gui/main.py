@@ -127,9 +127,9 @@ class App(tk.Tk):
 
         menubar = tk.Menu(self)
         fm = tk.Menu(menubar, tearoff=0)
-        fm.add_command(label="Save config", command=self.on_save)
-        fm.add_command(label="Load config", command=self.on_load_options)
-        fm.add_command(label="Reset config", command=self.on_reset_options)
+        fm.add_command(label="Save config file", command=self.on_save)
+        fm.add_command(label="Load config file", command=self.on_load_options)
+        fm.add_command(label="Reset config file", command=self.on_reset_options)
         fm.add_command(label="Sync Windows tasks", command=self.on_sync)
         fm.add_command(label="Enable wake timers", command=self.on_enable_wake_timers)
         fm.add_command(label="Error Log", command=self.on_open_error_log)
@@ -245,29 +245,46 @@ class App(tk.Tk):
         return f"weekly {days} @ {t}"
 
     def on_save(self) -> None:
-        if self.persist_and_sync(
+        target = filedialog.asksaveasfilename(
             parent=self,
-            show_success=True,
-            success_title="Saved",
-            success_message="Configuration written and Windows tasks synced.",
-        ):
-            self.refresh_lists()
+            title="Save config file",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile="iptv-dvr-config.json",
+        )
+        if not target:
+            return
+        try:
+            save_config(self.cfg, Path(target))
+        except Exception as e:
+            messagebox.showerror("Save config file", f"Could not save config file:\n{e}", parent=self)
+            return
+        messagebox.showinfo("Save config file", f"Configuration exported to:\n{target}", parent=self)
 
     def on_load_options(self) -> None:
-        reload_now = messagebox.askyesno(
-            "Load options",
-            "Reload options from config.json now?\n\nAny unsaved changes will be discarded.",
+        selected = filedialog.askopenfilename(
             parent=self,
+            title="Load config file",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
         )
-        if not reload_now:
+        if not selected:
             return
-        self.cfg = load_config()
+        try:
+            self.cfg = load_config(Path(selected))
+        except Exception as e:
+            messagebox.showerror("Load config file", f"Could not load config file:\n{e}", parent=self)
+            return
         self.refresh_lists()
-        messagebox.showinfo("Load options", "Options reloaded from config.json.", parent=self)
+        self.persist_and_sync(
+            parent=self,
+            show_success=True,
+            success_title="Load config file",
+            success_message="Config file loaded and Windows tasks synced.",
+        )
 
     def on_reset_options(self) -> None:
         confirm = messagebox.askyesno(
-            "Reset options",
+            "Reset config file",
             "Reset all options to defaults?\n\nThis will clear all sources and jobs.",
             parent=self,
         )
@@ -277,8 +294,8 @@ class App(tk.Tk):
         if self.persist_and_sync(
             parent=self,
             show_success=True,
-            success_title="Reset options",
-            success_message="Options were reset and tasks were synced.",
+            success_title="Reset config file",
+            success_message="Config was reset to defaults and tasks were synced.",
         ):
             self.refresh_lists()
 
