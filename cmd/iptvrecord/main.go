@@ -85,14 +85,15 @@ func cmdListChannels(args []string) {
 }
 
 type recordOpts struct {
-	m3uPath    string
-	channel    string
-	streamURL  string
-	duration   string
-	out        string
-	ffmpegPath string
-	userAgent  string
-	referer    string
+	m3uPath        string
+	channel        string
+	streamURL      string
+	duration       string
+	out            string
+	ffmpegPath     string
+	userAgent      string
+	referer        string
+	scheduledStart string
 }
 
 func parseRecordFlags(fs *flag.FlagSet, args []string) recordOpts {
@@ -105,6 +106,7 @@ func parseRecordFlags(fs *flag.FlagSet, args []string) recordOpts {
 	fs.StringVar(&o.ffmpegPath, "ffmpeg", "", "path to ffmpeg.exe (default: ffmpeg on PATH)")
 	fs.StringVar(&o.userAgent, "user-agent", "", "override User-Agent")
 	fs.StringVar(&o.referer, "referer", "", "override Referer header")
+	fs.StringVar(&o.scheduledStart, "scheduled-start", "", "internal: planned schedule start time")
 	_ = fs.Parse(args)
 	return o
 }
@@ -158,6 +160,49 @@ func runRecord(args []string) error {
 	dur, err := ffmpeg.ParseDuration(o.duration)
 	if err != nil {
 		return fmt.Errorf("duration: %w", err)
+	}
+	if o.scheduledStart != "" {
+		scheduledStart, err := time.Parse(time.RFC3339, o.scheduledStart)
+		if err != nil {
+			return fmt.Errorf("--scheduled-start: %w", err)
+		}
+		windowEnd := scheduledStart.Add(dur)
+		jitter := 8 * time.Second
+		now := time.Now()
+		if now.Before(scheduledStart.Add(-jitter)) {
+			wait := time.Until(scheduledStart)
+			if wait > 0 {
+				fmt.Fprintf(os.Stderr, "scheduled run arrived early; waiting %.1fs until start\n", wait.Seconds())
+				time.Sleep(wait)
+			}
+			now = time.Now()
+		}
+		if now.After(windowEnd.Add(jitter)) {
+			fmt.Fprintf(
+				os.Stderr,
+				"skipping run: recording window already ended (start=%s end=%s now=%s)\n",
+				scheduledStart.Format(time.RFC3339),
+				windowEnd.Format(time.RFC3339),
+				now.Format(time.RFC3339),
+			)
+			return nil
+		}
+		if now.After(scheduledStart.Add(jitter)) {
+			remaining := windowEnd.Sub(now)
+			if remaining <= 0 {
+				fmt.Fprintln(os.Stderr, "skipping run: no remaining duration in scheduled window")
+				return nil
+			}
+			dur = remaining
+			fmt.Fprintf(
+				os.Stderr,
+				"late start detected; recording remaining %.0fs (window end %s)\n",
+				dur.Seconds(),
+				windowEnd.Format(time.RFC3339),
+			)
+		} else {
+			fmt.Fprintf(os.Stderr, "on-time scheduled start; recording full configured duration (%s)\n", o.duration)
+		}
 	}
 	inputURL, ua, ref, err := resolveStream(o)
 	if err != nil {
@@ -222,7 +267,7 @@ func runSchedule(args []string) error {
 		return err
 	}
 
-	argLine := buildScheduledRecordArgLine(recArgs)
+	argLine := buildScheduledRecordArgLine(recArgs, runAt)
 	tname := taskName
 	if tname == "" {
 		tname = winschedule.DefaultTaskName(o.channel, runAt)
@@ -259,9 +304,10 @@ func splitScheduleArgs(args []string) (at, taskName string, recArgs []string, er
 	return at, taskName, recArgs, nil
 }
 
-// buildScheduledRecordArgLine builds the argument string for the scheduled task (record subcommand + flags).
-func buildScheduledRecordArgLine(recArgs []string) string {
+// buildScheduledRecordArgLine builds the argument string for the scheduled task.
+func buildScheduledRecordArgLine(recArgs []string, runAt time.Time) string {
 	parts := append([]string{"record"}, recArgs...)
+	parts = append(parts, "--scheduled-start", runAt.Format(time.RFC3339))
 	return strings.Join(quoteArgsForTask(parts), " ")
 }
 

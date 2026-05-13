@@ -39,7 +39,13 @@ from paths import (
     project_root,
 )
 from recorder import build_ffmpeg_argv, run_ffmpeg
-from scheduler_win import sync_all_tasks
+from scheduler_win import (
+    enable_wake_timers,
+    sync_all_tasks,
+    wake_readiness_warning,
+    wake_timer_value_label,
+    wake_timer_values,
+)
 
 
 def _python_for_tasks() -> Path:
@@ -93,8 +99,22 @@ def _run_job_cli() -> None:
     p = argparse.ArgumentParser(prog="iptv-gui")
     p.add_argument("run_job", nargs="?", help=argparse.SUPPRESS)
     p.add_argument("--job-id", required=True)
+    p.add_argument("--scheduled-start")
+    p.add_argument("--scheduled-mode", choices=("daily", "weekly"))
+    p.add_argument("--scheduled-hour", type=int)
+    p.add_argument("--scheduled-minute", type=int)
+    p.add_argument("--scheduled-days", default="")
     args = p.parse_args()
-    raise SystemExit(run_job(args.job_id))
+    raise SystemExit(
+        run_job(
+            args.job_id,
+            scheduled_start_text=args.scheduled_start,
+            scheduled_mode=args.scheduled_mode,
+            scheduled_hour=args.scheduled_hour,
+            scheduled_minute=args.scheduled_minute,
+            scheduled_days_csv=args.scheduled_days,
+        )
+    )
 
 
 class App(tk.Tk):
@@ -111,6 +131,7 @@ class App(tk.Tk):
         fm.add_command(label="Load config", command=self.on_load_options)
         fm.add_command(label="Reset config", command=self.on_reset_options)
         fm.add_command(label="Sync Windows tasks", command=self.on_sync)
+        fm.add_command(label="Enable wake timers", command=self.on_enable_wake_timers)
         fm.add_command(label="Error Log", command=self.on_open_error_log)
         fm.add_separator()
         fm.add_command(label="Quit", command=self.destroy)
@@ -174,10 +195,16 @@ class App(tk.Tk):
         ttk.Button(jb_top, text="Remove", command=self.remove_job).pack(side=tk.LEFT, padx=2)
         ttk.Button(jb_top, text="Run selected job now", command=self.run_selected_job_now).pack(side=tk.LEFT, padx=8)
         ttk.Button(jb_bottom, text="Test 15s capture", command=self.test_capture).pack(side=tk.LEFT, padx=2)
-        ttk.Button(jb_bottom, text="Save config", command=self.on_save).pack(side=tk.LEFT, padx=2)
-        ttk.Button(jb_bottom, text="Sync Windows tasks", command=self.on_sync).pack(side=tk.LEFT, padx=2)
+
+        status_fr = ttk.Frame(outer)
+        status_fr.pack(fill=tk.X, pady=(6, 0))
+        self.wake_status_v = tk.StringVar(value="Wake readiness: checking...")
+        self.wake_status_label = tk.Label(status_fr, textvariable=self.wake_status_v, fg="#444444")
+        self.wake_status_label.pack(side=tk.LEFT, anchor=tk.W)
+        ttk.Button(status_fr, text="Refresh wake status", command=self._refresh_wake_status).pack(side=tk.RIGHT, padx=2)
 
         self.refresh_lists()
+        self._refresh_wake_status()
         self._fit_main_window_to_content()
         self.after(100, self._maybe_prompt_install_dependencies)
 
@@ -263,6 +290,18 @@ class App(tk.Tk):
             success_message="Windows scheduled tasks are in sync.",
         )
 
+    def _refresh_wake_status(self) -> None:
+        ac_val, dc_val = wake_timer_values()
+        ac_label = wake_timer_value_label(ac_val)
+        dc_label = wake_timer_value_label(dc_val)
+        warn = wake_readiness_warning()
+        if warn:
+            self.wake_status_v.set(f"Wake readiness: needs attention (AC={ac_label}, DC={dc_label})")
+            self.wake_status_label.config(fg="#b00020")
+        else:
+            self.wake_status_v.set(f"Wake readiness: ready (AC={ac_label}, DC={dc_label})")
+            self.wake_status_label.config(fg="#1b7f3a")
+
     def persist_and_sync(
         self,
         *,
@@ -285,10 +324,39 @@ class App(tk.Tk):
         parent_win = parent if parent is not None else self
         if not ok:
             messagebox.showerror("Task error", err, parent=parent_win)
+            self._refresh_wake_status()
             return False
+        warn = wake_readiness_warning()
+        if warn:
+            if messagebox.askyesno(
+                "Wake readiness",
+                f"{warn}\n\nEnable wake timers now?",
+                parent=parent_win,
+            ):
+                ok_fix, msg_fix = enable_wake_timers()
+                if ok_fix:
+                    messagebox.showinfo("Wake readiness", msg_fix, parent=parent_win)
+                else:
+                    messagebox.showwarning("Wake readiness", f"Could not auto-fix:\n\n{msg_fix}", parent=parent_win)
+            else:
+                messagebox.showwarning("Wake readiness", warn, parent=parent_win)
+        self._refresh_wake_status()
         if show_success:
             messagebox.showinfo(success_title, success_message, parent=parent_win)
         return True
+
+    def on_enable_wake_timers(self) -> None:
+        ok, msg = enable_wake_timers()
+        self._refresh_wake_status()
+        if ok:
+            messagebox.showinfo("Wake timers", msg, parent=self)
+        else:
+            messagebox.showwarning(
+                "Wake timers",
+                "Could not enable wake timers automatically.\n\n"
+                f"{msg}",
+                parent=self,
+            )
 
     def on_close(self) -> None:
         if not self.persist_and_sync(parent=self):
@@ -942,8 +1010,22 @@ def main() -> None:
         p = argparse.ArgumentParser()
         p.add_argument("run_job", nargs="?")
         p.add_argument("--job-id", required=True)
+        p.add_argument("--scheduled-start")
+        p.add_argument("--scheduled-mode", choices=("daily", "weekly"))
+        p.add_argument("--scheduled-hour", type=int)
+        p.add_argument("--scheduled-minute", type=int)
+        p.add_argument("--scheduled-days", default="")
         args = p.parse_args()
-        raise SystemExit(run_job(args.job_id))
+        raise SystemExit(
+            run_job(
+                args.job_id,
+                scheduled_start_text=args.scheduled_start,
+                scheduled_mode=args.scheduled_mode,
+                scheduled_hour=args.scheduled_hour,
+                scheduled_minute=args.scheduled_minute,
+                scheduled_days_csv=args.scheduled_days,
+            )
+        )
     app = App()
     app.mainloop()
 

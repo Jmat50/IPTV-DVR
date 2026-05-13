@@ -21,7 +21,8 @@ func CreateOnceTask(taskName, exePath, argument string, runAt time.Time) error {
 			"$when=[datetime]::ParseExact(%s,'yyyyMMddHHmmss',$null); "+
 			"$a=New-ScheduledTaskAction -Execute %s -Argument %s; "+
 			"$tr=New-ScheduledTaskTrigger -Once -At $when; "+
-			"Register-ScheduledTask -TaskName %s -Action $a -Trigger $tr -Force | Out-Null",
+			"$st=New-ScheduledTaskSettingsSet -WakeToRun -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 24); "+
+			"Register-ScheduledTask -TaskName %s -Action $a -Trigger $tr -Settings $st -Force | Out-Null",
 		q(tStr), q(exePath), q(argument), q(taskName),
 	)
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps)

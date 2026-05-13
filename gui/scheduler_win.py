@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -16,6 +17,8 @@ PS_DAY = {
     "sat": "Saturday",
     "sun": "Sunday",
 }
+WAKE_TIMERS_GUID = "BD3B718A-0680-4D9D-8AB2-E1D2B4AC806D"
+PLAN_GUID_RE = re.compile(r"Power Scheme GUID:\s*([0-9a-fA-F\-]{36})", re.IGNORECASE)
 
 
 def task_name_for_job(job_id: str) -> str:
@@ -82,6 +85,18 @@ def _trigger_ps(job: Job) -> str:
     )
 
 
+def _schedule_meta_args(job: Job) -> str:
+    days = ",".join(d.strip().lower() for d in job.schedule.days if d.strip())
+    base = (
+        f" --scheduled-mode {job.schedule.mode}"
+        f" --scheduled-hour {job.schedule.hour}"
+        f" --scheduled-minute {job.schedule.minute}"
+    )
+    if days:
+        return base + f" --scheduled-days {days}"
+    return base
+
+
 def register_job_task(
     job: Job,
     *,
@@ -101,7 +116,7 @@ def register_job_task(
 $ErrorActionPreference = 'Stop'
 {trig}
 $st = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-  -StartWhenAvailable `
+  -WakeToRun `
   -ExecutionTimeLimit (New-TimeSpan -Hours 24)
 $a = New-ScheduledTaskAction -Execute {_ps_quote(str(launcher))} `
   -Argument {arg_ps} `
@@ -112,7 +127,132 @@ Register-ScheduledTask -TaskName {_ps_quote(name)} -Action $a -Trigger $tr -Sett
     if r.returncode != 0:
         msg = (r.stderr or r.stdout or "").strip() or f"exit {r.returncode}"
         return False, msg
+    verify = _run_ps(
+        (
+            "$ErrorActionPreference='Stop'; "
+            f"$t=Get-ScheduledTask -TaskName {_ps_quote(name)}; "
+            "if (-not $t.Settings.WakeToRun) { "
+            "  throw 'WakeToRun is not enabled on the task settings.' "
+            "}"
+        )
+    )
+    if verify.returncode != 0:
+        msg = (verify.stderr or verify.stdout or "").strip() or "could not verify WakeToRun"
+        return False, msg
     return True, ""
+
+
+def wake_readiness_warning() -> str:
+    """
+    Return a warning message if host wake-timer policy appears disabled.
+    Empty string means no warning.
+    """
+    ac_val, dc_val = wake_timer_values()
+    if ac_val is None and dc_val is None:
+        return ""
+    # 0 means disabled. 1/2 are enabled modes.
+    if ac_val == 0 or dc_val == 0:
+        return (
+            "Windows 'Allow wake timers' appears disabled for the current power plan.\n"
+            "Scheduled wake may not fire until this is enabled in Power Options."
+        )
+    return ""
+
+
+def wake_timer_values() -> tuple[int | None, int | None]:
+    """
+    Returns (ac, dc) wake timer values from current power scheme.
+    None means value could not be determined.
+    """
+    q = subprocess.run(
+        ["powercfg.exe", "/q", "SCHEME_CURRENT", "SUB_SLEEP", WAKE_TIMERS_GUID],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if q.returncode != 0:
+        return None, None
+    text = (q.stdout or "") + "\n" + (q.stderr or "")
+    ac = re.search(r"Current AC Power Setting Index:\s*0x([0-9a-fA-F]+)", text)
+    dc = re.search(r"Current DC Power Setting Index:\s*0x([0-9a-fA-F]+)", text)
+    ac_val = int(ac.group(1), 16) if ac else None
+    dc_val = int(dc.group(1), 16) if dc else None
+    return ac_val, dc_val
+
+
+def wake_timer_value_label(v: int | None) -> str:
+    if v is None:
+        return "unknown"
+    if v == 0:
+        return "disabled"
+    if v == 1:
+        return "enabled"
+    if v == 2:
+        return "important-only"
+    return f"value={v}"
+
+
+def _list_power_scheme_guids() -> list[str]:
+    r = subprocess.run(
+        ["powercfg.exe", "/l"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if r.returncode != 0:
+        return []
+    guids: list[str] = []
+    for line in (r.stdout or "").splitlines():
+        m = PLAN_GUID_RE.search(line)
+        if m:
+            guids.append(m.group(1))
+    # Keep order, remove duplicates.
+    out: list[str] = []
+    seen: set[str] = set()
+    for g in guids:
+        k = g.lower()
+        if k not in seen:
+            out.append(g)
+            seen.add(k)
+    return out
+
+
+def enable_wake_timers() -> tuple[bool, str]:
+    """
+    Try to enable wake timers for the current power plan (AC and DC).
+    Returns (ok, message).
+    """
+    schemes = _list_power_scheme_guids()
+    if not schemes:
+        schemes = ["SCHEME_CURRENT"]
+
+    errors: list[str] = []
+    for scheme in schemes:
+        cmds = [
+            ["powercfg.exe", "/setacvalueindex", scheme, "SUB_SLEEP", WAKE_TIMERS_GUID, "1"],
+            ["powercfg.exe", "/setdcvalueindex", scheme, "SUB_SLEEP", WAKE_TIMERS_GUID, "1"],
+        ]
+        for cmd in cmds:
+            r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if r.returncode != 0:
+                err = (r.stderr or r.stdout or "").strip() or f"exit {r.returncode}"
+                errors.append(f"{' '.join(cmd)} -> {err}")
+    # Re-apply current scheme so Windows uses the updated setting right away.
+    activate = subprocess.run(
+        ["powercfg.exe", "/setactive", "SCHEME_CURRENT"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if activate.returncode != 0:
+        err = (activate.stderr or activate.stdout or "").strip() or f"exit {activate.returncode}"
+        errors.append(f"powercfg.exe /setactive SCHEME_CURRENT -> {err}")
+    if errors:
+        return False, "\n".join(errors)
+    warn = wake_readiness_warning()
+    if warn:
+        return False, warn
+    return True, f"Wake timers enabled across {len(schemes)} power plan(s)."
 
 
 def sync_all_tasks(
@@ -140,11 +280,11 @@ def sync_all_tasks(
         if task_name_for_job(j.id) in running:
             continue
         if frozen_main:
-            arg = f"run-job --job-id {j.id}"
+            arg = f"run-job --job-id {j.id}{_schedule_meta_args(j)}"
         else:
             if main_script is None:
                 return False, "internal error: main_script required when not frozen"
-            arg = f'"{main_script}" run-job --job-id {j.id}'
+            arg = f'"{main_script}" run-job --job-id {j.id}{_schedule_meta_args(j)}'
         ok, err = register_job_task(j, launcher=launcher, argument=arg, work_dir=work_dir)
         if not ok:
             errors.append(f"{j.name}: {err}")
