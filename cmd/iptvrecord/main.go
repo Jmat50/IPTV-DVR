@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"iptv-recorder/internal/ffmpeg"
-	"iptv-recorder/internal/m3u"
-	"iptv-recorder/internal/winschedule"
+	"iptv-dvr/internal/ffmpeg"
+	"iptv-dvr/internal/m3u"
+	"iptv-dvr/internal/winschedule"
 )
 
 const version = "0.1.0"

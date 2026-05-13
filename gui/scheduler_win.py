@@ -219,7 +219,7 @@ def _list_power_scheme_guids() -> list[str]:
 
 def enable_wake_timers() -> tuple[bool, str]:
     """
-    Try to enable wake timers for the current power plan (AC and DC).
+    Try to enable wake timers across available power plans (AC and DC).
     Returns (ok, message).
     """
     schemes = _list_power_scheme_guids()
@@ -252,7 +252,7 @@ def enable_wake_timers() -> tuple[bool, str]:
     warn = wake_readiness_warning()
     if warn:
         return False, warn
-    return True, f"Wake timers enabled across {len(schemes)} power plan(s)."
+    return True, "Wake timers enabled for all available power plans."
 
 
 def sync_all_tasks(

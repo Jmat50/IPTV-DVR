@@ -120,7 +120,7 @@ def _run_job_cli() -> None:
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("IPTV Recorder (local)")
+        self.title("IPTV-DVR (local)")
         self.cfg: AppConfig = load_config()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.report_callback_exception = self.on_tk_callback_exception

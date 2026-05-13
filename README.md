@@ -1,4 +1,4 @@
-# iptv-recorder
+# IPTV-DVR
 
 Super lightweight utility to record a live stream from an M3U playlist (or a direct URL) using FFmpeg stream copy. This allows for lossless capture of a live stream without re-encoding.
 
@@ -17,7 +17,7 @@ This downloads a Windows x64 **GPL** build from [BtbN/FFmpeg-Builds](https://git
 From the repo root (installs/updates PyInstaller via pip, then builds a **one-file, windowed** executable into **`gui\iptv-gui.exe`**). Close any running `gui\iptv-gui.exe` before rebuilding.
 
 ```powershell
-cd "C:\Visual Studio\iptv-recorder"
+cd "C:\Visual Studio\IPTV-DVR"
 powershell -ExecutionPolicy Bypass -File .\scripts\build_gui_exe.ps1
 ```
 
@@ -49,7 +49,7 @@ iptv-gui.exe run-job --job-id <uuid>
 Run (Python 3.10+ with Tk on Windows):
 
 ```powershell
-cd "C:\Visual Studio\iptv-recorder"
+cd "C:\Visual Studio\IPTV-DVR"
 python .\gui\main.py
 ```
 
@@ -61,7 +61,7 @@ python .\gui\main.py
 ## Install (from source)
 
 ```powershell
-cd "C:\Visual Studio\iptv-recorder"
+cd "C:\Visual Studio\IPTV-DVR"
 go build -o iptvrecord.exe ./cmd/iptvrecord
 ```
 

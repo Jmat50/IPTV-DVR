@@ -1,3 +1,3 @@
-module iptv-recorder
+module iptv-dvr
 
 go 1.22

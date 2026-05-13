@@ -1,4 +1,4 @@
-"""Paths for dev (repo) and PyInstaller frozen exe (next to iptv-recorder.exe)."""
+"""Paths for dev (repo) and PyInstaller frozen exe (next to iptv-dvr.exe)."""
 
 from __future__ import annotations
 

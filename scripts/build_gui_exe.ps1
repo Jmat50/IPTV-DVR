@@ -4,7 +4,7 @@
 # It skips install when already present unless force switches are passed.
 # Prereqs: Python 3.10+ on PATH (py launcher or python), pip, Internet for pip/pyinstaller and FFmpeg download.
 #
-# Close any running copy of gui\iptv-gui.exe (or an older gui\iptv-recorder.exe) before rebuilding.
+# Close any running copy of gui\iptv-gui.exe (or an older gui\iptv-dvr.exe) before rebuilding.
 param(
     [switch]$ForceFfmpeg
 )

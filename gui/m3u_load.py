@@ -18,7 +18,7 @@ class Channel:
 
 def load_m3u(path_or_url: str, timeout: int = 60) -> list[Channel]:
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-        req = urllib.request.Request(path_or_url, headers={"User-Agent": "iptv-recorder-gui/1.0"})
+        req = urllib.request.Request(path_or_url, headers={"User-Agent": "iptv-dvr-gui/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             text = r.read().decode("utf-8", errors="replace")
     else:
