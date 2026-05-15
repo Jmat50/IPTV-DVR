@@ -119,6 +119,36 @@ def _any_caption_sidecar(output_path: Path) -> bool:
     return False
 
 
+def probe_url_has_subtitles(
+    stream_url: str,
+    *,
+    user_agent: str = "",
+    referer: str = "",
+) -> bool:
+    """Return True when the live input exposes a subtitle stream for dual-output capture."""
+    fp = ffprobe_exe()
+    if not fp.is_file():
+        return False
+    cmd = [str(fp), "-v", "error"]
+    if user_agent:
+        cmd += ["-user_agent", user_agent]
+    if referer:
+        cmd += ["-headers", f"Referer: {referer}\r\n"]
+    cmd += [
+        "-select_streams",
+        "s",
+        "-show_entries",
+        "stream=index",
+        "-of",
+        "csv=p=0",
+        stream_url,
+    ]
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if p.returncode != 0:
+        return False
+    return bool((p.stdout or "").strip())
+
+
 def build_ffmpeg_argv(
     *,
     stream_url: str,
@@ -158,7 +188,11 @@ def build_ffmpeg_argv(
         "-y",
         str(output_path),
     ]
-    if download_captions:
+    if download_captions and probe_url_has_subtitles(
+        stream_url,
+        user_agent=user_agent,
+        referer=referer,
+    ):
         args += [
             "-map",
             "0:s:0?",

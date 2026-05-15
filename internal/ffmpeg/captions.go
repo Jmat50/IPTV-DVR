@@ -38,6 +38,32 @@ func AnyCaptionSidecar(outputPath string) bool {
 	return false
 }
 
+// ProbeURLHasSubtitles reports whether a live input URL exposes subtitle streams.
+func ProbeURLHasSubtitles(ffprobePath, inputURL, userAgent, referer string) bool {
+	if ffprobePath == "" {
+		ffprobePath = "ffprobe"
+	}
+	args := []string{
+		"-v", "error",
+		"-select_streams", "s",
+		"-show_entries", "stream=index",
+		"-of", "csv=p=0",
+	}
+	if userAgent != "" {
+		args = append([]string{"-user_agent", userAgent}, args...)
+	}
+	if referer != "" {
+		args = append([]string{"-headers", fmt.Sprintf("Referer: %s\r\n", referer)}, args...)
+	}
+	args = append(args, inputURL)
+	cmd := exec.Command(ffprobePath, args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != ""
+}
+
 // ProbeSubtitleCodec returns the codec_name of the first subtitle stream in path, or "".
 func ProbeSubtitleCodec(ffprobePath, mediaPath string) (string, error) {
 	if ffprobePath == "" {

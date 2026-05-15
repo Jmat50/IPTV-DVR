@@ -217,7 +217,10 @@ func runRecord(args []string) error {
 	}
 	captionsPath := ""
 	if o.captions {
-		captionsPath = ffmpeg.CaptionsSidecarPath(o.out)
+		ffprobe := ffprobeFromFFmpeg(ff)
+		if ffmpeg.ProbeURLHasSubtitles(ffprobe, inputURL, ua, ref) {
+			captionsPath = ffmpeg.CaptionsSidecarPath(o.out)
+		}
 	}
 	argv, err := ffmpeg.BuildArgv(ffmpeg.Args{
 		FFmpegPath:   ff,
