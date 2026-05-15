@@ -1,6 +1,8 @@
 # Downloads latest Windows x64 FFmpeg (GPL) from BtbN FFmpeg-Builds into
 # DestDir\ffmpeg.exe and DestDir\ffprobe.exe.
 # License: FFmpeg is LGPL/GPL — see https://ffmpeg.org/legal.html and the build's README.
+# Runtime: how IPTV-DVR invokes FFmpeg (Windows console protection) is documented in README.md
+#   under "FFmpeg console and accidental close (Windows)".
 param(
     # Default: <repo>\gui\ffmpeg
     [string]$DestDir = ""

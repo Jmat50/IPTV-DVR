@@ -4,13 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"iptv-dvr/internal/ffmpeg"
 	"iptv-dvr/internal/m3u"
+	"iptv-dvr/internal/winffmpeg"
 	"iptv-dvr/internal/winschedule"
 )
 
@@ -234,12 +234,8 @@ func runRecord(args []string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	fmt.Fprintf(os.Stderr, "running: %s %s\n", argv[0], strings.Join(argv[1:], " "))
-	if err := cmd.Run(); err != nil {
+	if err := winffmpeg.Run(argv); err != nil {
 		return err
 	}
 	if o.captions {

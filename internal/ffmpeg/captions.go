@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"iptv-dvr/internal/winffmpeg"
 )
 
 // CaptionsSidecarPath returns the .vtt path alongside a recording file.
@@ -135,8 +137,7 @@ func TryExtractCaptionsFromTS(ffmpegPath, ffprobePath, tsPath string) (bool, err
 	if err != nil {
 		return false, err
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	if err := cmd.Run(); err != nil {
+	if err := winffmpeg.Run(argv); err != nil {
 		return false, err
 	}
 	outPath := argv[len(argv)-1]

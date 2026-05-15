@@ -10,7 +10,7 @@ The **Tkinter GUI** uses FFmpeg from `gui\ffmpeg\` (not committed to git). From 
 powershell -ExecutionPolicy Bypass -File .\scripts\download_ffmpeg.ps1
 ```
 
-This downloads a Windows x64 **GPL** build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (see [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html)).
+This downloads a Windows x64 **GPL** build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (see [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html)). While recording, the GUI uses the Windows console safeguards described under [FFmpeg console and accidental close](#ffmpeg-console-and-accidental-close-windows).
 
 ## Build standalone GUI (`gui\iptv-gui.exe`)
 
@@ -35,6 +35,25 @@ iptv-gui.exe run-job --job-id <uuid>
 
 (`config.json` and `logs\` live in the same folder as `iptv-gui.exe` when you run the frozen build.)
 
+## FFmpeg console and accidental close (Windows)
+
+While a recording **FFmpeg** process is running, the app tries to prevent **accidentally closing its console** from the window chrome (same behavior for the GUI pipeline and the Go CLI on Windows):
+
+- **Remove the Close (X) control** from the system menu and **append a disabled** menu line: `Close disabled during active recording`.
+- **Adjust the window title** to append ` [PROTECTED - DO NOT CLOSE]` when that marker is not already present (Python mirrors the same string checks as in [`gui/recorder.py`](gui/recorder.py); Go uses [`internal/winffmpeg`](internal/winffmpeg/run_windows.go)).
+
+**Where this applies**
+
+| Path | Mechanism |
+|------|-----------|
+| GUI **Test 15s capture**, **Run job** (`run-job`) | [`gui/recorder.py`](gui/recorder.py) `run_ffmpeg` starts FFmpeg with piped output and arms the guard on the child **PID** (polls up to ~5s for a `ConsoleWindowClass` window). |
+| **`iptvrecord record`** and post-record caption extract | [`internal/winffmpeg`](internal/winffmpeg/run_windows.go) starts FFmpeg with **`CREATE_NEW_CONSOLE`** so the subprocess owns its console, applies the same User32 steps, then waits. |
+| **macOS / Linux** (`iptvrecord` on non-Windows) | No console guard; plain `exec` with inherited stdio. |
+
+**`iptvrecord` from `cmd` or PowerShell:** FFmpeg opens in a **separate** console window (so the guard can attach reliably). Your shell still prints the `running: ffmpeg ...` line; FFmpeg progress and messages appear in the FFmpeg window.
+
+**Not prevented:** Task Manager, `taskkill`, killing the parent process, or loss of console visibility (e.g. some redirected / service contexts).
+
 ## Tkinter GUI (recurring schedules + M3U sources)
 
 - Add / edit / remove **M3U sources** (local file or `http(s)` URL).
@@ -45,6 +64,7 @@ iptv-gui.exe run-job --job-id <uuid>
   `"…\gui\iptv-gui.exe" run-job --job-id <uuid>` (frozen build), with working directory set accordingly.
 - **Run selected job now** starts the selected job immediately in background (handy for validation before waiting on a schedule).
 - **Test 15s capture** uses the selected job’s source/channel.
+- Optional per job: **download closed captions when available** mirrors the CLI `--captions` flag (see [Closed captions](#closed-captions) below).
 
 Run (Python 3.10+ with Tk on Windows):
 
@@ -57,6 +77,7 @@ python .\gui\main.py
 
 - **Windows** (primary target; FFmpeg invocation is standard and works elsewhere too).
 - **FFmpeg** on `PATH`, or pass `--ffmpeg` to `ffmpeg.exe` (e.g. a [Gyan.dev build](https://www.gyan.dev/ffmpeg/builds/)).
+- On **Windows**, `iptvrecord record` uses a **dedicated FFmpeg console** and the same close/title protection as the GUI ([FFmpeg console and accidental close](#ffmpeg-console-and-accidental-close-windows)).
 
 ## Install (from source)
 
@@ -78,6 +99,8 @@ Copy `iptvrecord.exe` anywhere you like.
 
 ### Record now
 
+On **Windows**, FFmpeg output appears in a **separate console** with the same accidental-close protection as the GUI ([details](#ffmpeg-console-and-accidental-close-windows)).
+
 From playlist (match channel name exactly, case-insensitive, or a **unique** substring):
 
 ```powershell
@@ -94,6 +117,12 @@ Optional overrides:
 
 ```powershell
 .\iptvrecord.exe record ... --ffmpeg "C:\ffmpeg\bin\ffmpeg.exe" --user-agent "VLC/3.0" --referer "https://provider/"
+```
+
+Add a sidecar when the manifest exposes subtitle streams (`--captions`):
+
+```powershell
+.\iptvrecord.exe record ... --out D:\rec.ts --captions
 ```
 
 ### Schedule once (Task Scheduler)
@@ -123,6 +152,19 @@ Optional task name:
 ```powershell
 ffmpeg -i recorded.ts -c copy recorded.mp4
 ```
+
+## Closed captions
+
+Recording uses **stream copy** (`-c copy`) for video and audio. Caption behavior depends on how the broadcaster delivers them:
+
+| Delivery | What you get in `.ts` | Sidecar `.vtt` / `--captions` |
+|----------|------------------------|------------------------------|
+| **Embedded in video** (CEA-608 / ATSC A53 in H.264) | Caption data stays **in the video elementary stream**. Players such as VLC can show CC (**often CC1**; CC2-CC4 services may appear empty.) | Not required for embedded captions. Optional feature does little unless a separate subtitle track exists on the manifest or later in the file. |
+| **HLS subtitles** (distinct WebVTT / subtitle playlists) | Main output is still video+audio copy; text is only in the `.ts` if you map that subtitle stream into the same multiplex (the app prefers a `.vtt` sidecar when enabled). | Enable **download closed captions** on the job, or `--captions` with the Go CLI; recording still succeeds when no subtitle stream is present (optional maps). |
+
+**Practical takeaway:** Many IPTV feeds use **broadcast-style embedded CC**. You normally **do not need** a `.srt` or `.vtt` file unless you want subtitles as a separate file or the provider exposes them only as **HLS subtitle renditions**.
+
+**Playlist tip:** If an M3U lists the same channel name more than once, the app matches **the first** matching entry (`#EXTINF` then URL).
 
 ## Legal
 
