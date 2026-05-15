@@ -217,20 +217,21 @@ def _list_power_scheme_guids() -> list[str]:
     return out
 
 
-def enable_wake_timers() -> tuple[bool, str]:
+def _set_wake_timers(enabled: bool) -> tuple[bool, str]:
     """
-    Try to enable wake timers across available power plans (AC and DC).
+    Set wake timers across available power plans (AC and DC).
     Returns (ok, message).
     """
     schemes = _list_power_scheme_guids()
     if not schemes:
         schemes = ["SCHEME_CURRENT"]
+    value = "1" if enabled else "0"
 
     errors: list[str] = []
     for scheme in schemes:
         cmds = [
-            ["powercfg.exe", "/setacvalueindex", scheme, "SUB_SLEEP", WAKE_TIMERS_GUID, "1"],
-            ["powercfg.exe", "/setdcvalueindex", scheme, "SUB_SLEEP", WAKE_TIMERS_GUID, "1"],
+            ["powercfg.exe", "/setacvalueindex", scheme, "SUB_SLEEP", WAKE_TIMERS_GUID, value],
+            ["powercfg.exe", "/setdcvalueindex", scheme, "SUB_SLEEP", WAKE_TIMERS_GUID, value],
         ]
         for cmd in cmds:
             r = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -249,10 +250,20 @@ def enable_wake_timers() -> tuple[bool, str]:
         errors.append(f"powercfg.exe /setactive SCHEME_CURRENT -> {err}")
     if errors:
         return False, "\n".join(errors)
-    warn = wake_readiness_warning()
-    if warn:
-        return False, warn
-    return True, "Wake timers enabled for all available power plans."
+    if enabled:
+        warn = wake_readiness_warning()
+        if warn:
+            return False, warn
+        return True, "Wake timers enabled for all available power plans."
+    return True, "Wake timers disabled for all available power plans."
+
+
+def enable_wake_timers() -> tuple[bool, str]:
+    return _set_wake_timers(True)
+
+
+def disable_wake_timers() -> tuple[bool, str]:
+    return _set_wake_timers(False)
 
 
 def sync_all_tasks(

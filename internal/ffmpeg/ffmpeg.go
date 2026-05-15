@@ -9,12 +9,13 @@ import (
 
 // Args holds inputs for building an ffmpeg stream-copy record command.
 type Args struct {
-	FFmpegPath string
-	InputURL   string
-	OutputPath string
-	Duration   time.Duration
-	UserAgent  string
-	Referer    string
+	FFmpegPath   string
+	InputURL     string
+	OutputPath   string
+	CaptionsPath string // optional sidecar .vtt (empty = no caption output)
+	Duration     time.Duration
+	UserAgent    string
+	Referer      string
 }
 
 // BuildArgv returns a full argv slice: [ffmpegExe, flags...] for exec.Command(argv[0], argv[1:]...).
@@ -52,13 +53,24 @@ func BuildArgv(a Args) ([]string, error) {
 	if a.Referer != "" {
 		out = append(out, "-headers", fmt.Sprintf("Referer: %s\r\n", a.Referer))
 	}
+	out = append(out, "-i", a.InputURL)
 	out = append(out,
-		"-i", a.InputURL,
+		"-map", "0:v:0",
+		"-map", "0:a:0?",
 		"-c", "copy",
 		"-t", strconv.Itoa(sec),
 		"-y",
 		a.OutputPath,
 	)
+	if a.CaptionsPath != "" {
+		out = append(out,
+			"-map", "0:s:0?",
+			"-c", "copy",
+			"-t", strconv.Itoa(sec),
+			"-y",
+			a.CaptionsPath,
+		)
+	}
 	return out, nil
 }
 

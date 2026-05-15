@@ -13,7 +13,7 @@ from config_store import job_by_id, load_config, source_by_id
 from duration_parse import parse_duration
 from m3u_load import find_channel, load_m3u
 from paths import log_dir
-from recorder import build_ffmpeg_argv, run_ffmpeg
+from recorder import build_ffmpeg_argv, maybe_post_extract_captions, run_ffmpeg
 
 _JITTER_SECONDS = 8
 
@@ -205,6 +205,7 @@ def run_job(
             duration_text=duration_text,
             user_agent=ua,
             referer=ref,
+            download_captions=job.download_captions,
         )
     except Exception as e:
         print(f"build: {e}", file=sys.stderr)
@@ -213,5 +214,10 @@ def run_job(
     if code != 0:
         print(f"ffmpeg exited {code}; see {log_path}", file=sys.stderr)
         return code
+    maybe_post_extract_captions(
+        out,
+        download_captions=job.download_captions,
+        log_file=log_path,
+    )
 
     return 0

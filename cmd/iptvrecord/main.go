@@ -49,6 +49,7 @@ Commands:
   record         (--m3u <file|url> --channel <name>)  OR  --url <stream-url>
                  --duration <e.g. 90m, 1h30m, 3600> --out <path.ts>
                  [--ffmpeg <path\to\ffmpeg.exe>] [--user-agent ...] [--referer ...]
+                 [--captions]
   schedule       --at <RFC3339>  (same flags as record)
                  [--task-name <name>]
   version
@@ -94,6 +95,7 @@ type recordOpts struct {
 	userAgent      string
 	referer        string
 	scheduledStart string
+	captions       bool
 }
 
 func parseRecordFlags(fs *flag.FlagSet, args []string) recordOpts {
@@ -107,6 +109,7 @@ func parseRecordFlags(fs *flag.FlagSet, args []string) recordOpts {
 	fs.StringVar(&o.userAgent, "user-agent", "", "override User-Agent")
 	fs.StringVar(&o.referer, "referer", "", "override Referer header")
 	fs.StringVar(&o.scheduledStart, "scheduled-start", "", "internal: planned schedule start time")
+	fs.BoolVar(&o.captions, "captions", false, "download closed captions to a .vtt sidecar when available")
 	_ = fs.Parse(args)
 	return o
 }
@@ -212,13 +215,18 @@ func runRecord(args []string) error {
 	if ff == "" {
 		ff = "ffmpeg"
 	}
+	captionsPath := ""
+	if o.captions {
+		captionsPath = ffmpeg.CaptionsSidecarPath(o.out)
+	}
 	argv, err := ffmpeg.BuildArgv(ffmpeg.Args{
-		FFmpegPath: ff,
-		InputURL:   inputURL,
-		OutputPath: o.out,
-		Duration:   dur,
-		UserAgent:  ua,
-		Referer:    ref,
+		FFmpegPath:   ff,
+		InputURL:     inputURL,
+		OutputPath:   o.out,
+		CaptionsPath: captionsPath,
+		Duration:     dur,
+		UserAgent:    ua,
+		Referer:      ref,
 	})
 	if err != nil {
 		return err
@@ -228,7 +236,33 @@ func runRecord(args []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	fmt.Fprintf(os.Stderr, "running: %s %s\n", argv[0], strings.Join(argv[1:], " "))
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	if o.captions {
+		ffprobe := ffprobeFromFFmpeg(ff)
+		if ffmpeg.SidecarHasContent(captionsPath) || ffmpeg.AnyCaptionSidecar(o.out) {
+			return nil
+		}
+		if strings.EqualFold(filepath.Ext(o.out), ".ts") {
+			ok, extractErr := ffmpeg.TryExtractCaptionsFromTS(ff, ffprobe, o.out)
+			if extractErr != nil {
+				fmt.Fprintf(os.Stderr, "caption extract: %v\n", extractErr)
+			} else if !ok {
+				fmt.Fprintln(os.Stderr, "captions: none found in stream or recording")
+			}
+		} else if captionsPath != "" {
+			fmt.Fprintln(os.Stderr, "captions: none found in stream or recording")
+		}
+	}
+	return nil
+}
+
+func ffprobeFromFFmpeg(ffmpegPath string) string {
+	if ffmpegPath == "" {
+		return "ffprobe"
+	}
+	return filepath.Join(filepath.Dir(ffmpegPath), "ffprobe"+filepath.Ext(ffmpegPath))
 }
 
 func runSchedule(args []string) error {

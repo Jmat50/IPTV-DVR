@@ -45,6 +45,7 @@ class Job:
     user_agent: str = ""
     referer: str = ""
     enabled: bool = True
+    download_captions: bool = False
     schedule: Schedule = field(default_factory=Schedule)
 
     @staticmethod
@@ -101,6 +102,7 @@ def _job_from_dict(d: dict[str, Any]) -> Job:
         user_agent=d.get("user_agent", ""),
         referer=d.get("referer", ""),
         enabled=bool(d.get("enabled", True)),
+        download_captions=bool(d.get("download_captions", False)),
         schedule=_schedule_from_dict(sch) if isinstance(sch, dict) else Schedule(),
     )
 

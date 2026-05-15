@@ -38,14 +38,31 @@ from paths import (
     log_dir,
     project_root,
 )
-from recorder import build_ffmpeg_argv, run_ffmpeg
+from recorder import (
+    build_ffmpeg_argv,
+    caption_sidecar_path,
+    maybe_post_extract_captions,
+    run_ffmpeg,
+)
 from scheduler_win import (
+    disable_wake_timers,
     enable_wake_timers,
     sync_all_tasks,
     wake_readiness_warning,
     wake_timer_value_label,
     wake_timer_values,
 )
+
+FILENAME_PATTERN_PRESETS = [
+    "{date}_{channel}",
+    "{date}_{time}_{channel}",
+    "{channel}_{date}_{time}",
+    "{channel}_{date}",
+    "{date}_{channel}_{time}",
+    "{time}_{channel}",
+    "{channel}",
+    "{date}",
+]
 
 
 def _python_for_tasks() -> Path:
@@ -363,14 +380,54 @@ class App(tk.Tk):
         return True
 
     def on_enable_wake_timers(self) -> None:
-        ok, msg = enable_wake_timers()
+        ac_val, dc_val = wake_timer_values()
+        is_enabled = (ac_val not in (None, 0)) and (dc_val not in (None, 0))
+
+        dlg = tk.Toplevel(self)
+        dlg.title("Wake timer settings")
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.resizable(False, False)
+        body = ttk.Frame(dlg, padding=12)
+        body.grid(row=0, column=0, sticky="nsew")
+        ttk.Label(
+            body,
+            text=(
+                "Allow Windows to wake this PC from sleep for scheduled recordings.\n"
+                "This depends on hardware and Windows power policy."
+            ),
+            justify=tk.LEFT,
+        ).grid(row=0, column=0, sticky=tk.W)
+
+        enabled_v = tk.BooleanVar(value=is_enabled)
+        ttk.Checkbutton(
+            body,
+            text="Enable wake timers for scheduled recordings",
+            variable=enabled_v,
+        ).grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
+
+        actions = ttk.Frame(body)
+        actions.grid(row=2, column=0, sticky=tk.E, pady=(12, 0))
+        result = {"apply": False}
+
+        def _apply() -> None:
+            result["apply"] = True
+            dlg.destroy()
+
+        ttk.Button(actions, text="Apply", command=_apply).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(actions, text="Cancel", command=dlg.destroy).pack(side=tk.LEFT)
+        self.wait_window(dlg)
+        if not result["apply"]:
+            return
+
+        ok, msg = enable_wake_timers() if enabled_v.get() else disable_wake_timers()
         self._refresh_wake_status()
         if ok:
-            messagebox.showinfo("Wake timers", msg, parent=self)
+            messagebox.showinfo("Wake timer settings", msg, parent=self)
         else:
             messagebox.showwarning(
-                "Wake timers",
-                "Could not enable wake timers automatically.\n\n"
+                "Wake timer settings",
+                "Could not apply wake timer settings.\n\n"
                 f"{msg}",
                 parent=self,
             )
@@ -582,10 +639,11 @@ class App(tk.Tk):
             return
 
         try:
-            self._launch_run_job_detached(j.id)
+            proc = self._launch_run_job_detached(j.id)
         except Exception as e:
             messagebox.showerror("Run now", f"Could not start job in detached mode:\n{e}")
             return
+        self.after(2500, lambda: self._check_manual_run_startup(j, proc))
         messagebox.showinfo(
             "Run now",
             "Job started in independent background process.\n"
@@ -593,7 +651,19 @@ class App(tk.Tk):
             "Check logs in gui\\logs\\job_<id>.log while it runs.",
         )
 
-    def _launch_run_job_detached(self, job_id: str) -> None:
+    def _check_manual_run_startup(self, job: Job, proc: subprocess.Popen) -> None:
+        code = proc.poll()
+        if code is None:
+            return
+        log_path = log_dir() / f"job_{job.id}.log"
+        messagebox.showwarning(
+            "Run now",
+            f"Job process exited soon after launch (exit code {code}).\n"
+            f"Check log for details:\n{log_path}",
+            parent=self,
+        )
+
+    def _launch_run_job_detached(self, job_id: str) -> subprocess.Popen:
         root = project_root()
         frozen = is_frozen()
         if frozen:
@@ -625,12 +695,12 @@ class App(tk.Tk):
         else:
             kwargs["start_new_session"] = True
         try:
-            subprocess.Popen(cmd, **kwargs)
+            return subprocess.Popen(cmd, **kwargs)
         except OSError:
             # Fallback if breakaway is blocked by local policy.
             if sys.platform == "win32":
                 kwargs["creationflags"] = create_new_process_group | detached_process
-                subprocess.Popen(cmd, **kwargs)
+                return subprocess.Popen(cmd, **kwargs)
             else:
                 raise
 
@@ -673,6 +743,7 @@ class App(tk.Tk):
                 duration_text="15s",
                 user_agent=ua,
                 referer=ref,
+                download_captions=j.download_captions,
             )
         except Exception as e:
             messagebox.showerror("Test", str(e))
@@ -680,9 +751,17 @@ class App(tk.Tk):
         self.config(cursor="watch")
         self.update_idletasks()
         code = run_ffmpeg(argv, log_file=None)
+        if code == 0:
+            maybe_post_extract_captions(out, download_captions=j.download_captions)
         self.config(cursor="")
         if code == 0:
-            messagebox.showinfo("Test", f"Saved 15s sample to:\n{out}")
+            cap_note = ""
+            for ext in (".vtt", ".srt", ".ass"):
+                cap = out.with_suffix(ext)
+                if cap.is_file() and cap.stat().st_size > 0:
+                    cap_note = f"\nCaptions:\n{cap}"
+                    break
+            messagebox.showinfo("Test", f"Saved 15s sample to:\n{out}{cap_note}")
         else:
             messagebox.showerror("Test", f"ffmpeg failed (code {code})")
 
@@ -733,9 +812,19 @@ class JobEditor(tk.Toplevel):
         ttk.Button(of, text="Browse…", command=self.browse_out).pack(side=tk.LEFT, padx=4)
 
         ttk.Label(f, text="Filename pattern").grid(row=5, column=0, sticky=tk.W)
-        self.pat_v = tk.StringVar(value=job.filename_pattern if job else "{date}_{channel}.ts")
-        ttk.Entry(f, textvariable=self.pat_v, width=44).grid(row=5, column=1, sticky=tk.W)
-        ttk.Label(f, text="{date} {time} {channel}", font=("TkDefaultFont", 8)).grid(row=6, column=1, sticky=tk.W)
+        initial_pattern = Path(job.filename_pattern).stem if job else "{date}_{channel}"
+        preset_values = list(FILENAME_PATTERN_PRESETS)
+        if initial_pattern not in preset_values:
+            preset_values.append(initial_pattern)
+        self.pat_v = tk.StringVar(value=initial_pattern)
+        ttk.Combobox(
+            f,
+            textvariable=self.pat_v,
+            values=preset_values,
+            width=41,
+            state="readonly",
+        ).grid(row=5, column=1, sticky=tk.W)
+        ttk.Label(f, text="Uses: {date} {time} {channel}", font=("TkDefaultFont", 8)).grid(row=6, column=1, sticky=tk.W)
 
         ttk.Label(f, text="Schedule").grid(row=7, column=0, sticky=tk.NW, pady=6)
         sf = ttk.Frame(f)
@@ -779,8 +868,15 @@ class JobEditor(tk.Toplevel):
         self.en_v = en_v
         ttk.Checkbutton(f, text="Enabled", variable=en_v).grid(row=8, column=1, sticky=tk.W, pady=2)
 
+        self.captions_v = tk.BooleanVar(value=job.download_captions if job else False)
+        ttk.Checkbutton(
+            f,
+            text="Download closed captions when available",
+            variable=self.captions_v,
+        ).grid(row=9, column=1, sticky=tk.W, pady=2)
+
         fmt_fr = ttk.Frame(f)
-        fmt_fr.grid(row=9, column=1, sticky=tk.W, pady=2)
+        fmt_fr.grid(row=10, column=1, sticky=tk.W, pady=2)
         ttk.Label(fmt_fr, text="Output format").pack(side=tk.LEFT)
         default_fmt = job.output_format if job else "ts"
         self.output_fmt_v = tk.StringVar(value=default_fmt if default_fmt in ("ts", "mp4", "mkv", "mov") else "ts")
@@ -793,7 +889,7 @@ class JobEditor(tk.Toplevel):
         ).pack(side=tk.LEFT, padx=6)
 
         bf = ttk.Frame(f)
-        bf.grid(row=10, column=0, columnspan=2, pady=12)
+        bf.grid(row=11, column=0, columnspan=2, pady=12)
         ttk.Button(bf, text="Save job", command=self.save).pack(side=tk.LEFT, padx=4)
         ttk.Button(bf, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=4)
 
@@ -888,11 +984,12 @@ class JobEditor(tk.Toplevel):
         selected_fmt = self.output_fmt_v.get().strip().lower() or "ts"
         if selected_fmt not in ("ts", "mp4", "mkv", "mov"):
             selected_fmt = "ts"
-        pattern = self.pat_v.get().strip() or "{date}_{channel}.ts"
+        pattern = self.pat_v.get().strip() or "{date}_{channel}"
         base = Path(pattern).stem if Path(pattern).suffix else pattern
         j.filename_pattern = f"{base}.{selected_fmt}"
         j.output_format = selected_fmt
         j.enabled = self.en_v.get()
+        j.download_captions = self.captions_v.get()
         j.schedule.mode = "daily" if mode == "daily" else "weekly"
         j.schedule.days = [] if mode == "daily" else days
         j.schedule.hour = hour

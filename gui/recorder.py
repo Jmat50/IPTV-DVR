@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from duration_parse import parse_duration
-from paths import ffmpeg_exe
+from paths import ffmpeg_exe, ffprobe_exe
 
 if sys.platform == "win32":
     import ctypes
@@ -101,6 +101,24 @@ def _start_ffmpeg_console_close_guard(pid: int) -> None:
     threading.Thread(target=_arm_ffmpeg_console_close_guard, args=(pid,), daemon=True).start()
 
 
+def caption_sidecar_path(output_path: Path) -> Path:
+    return output_path.with_suffix(".vtt")
+
+
+def _sidecar_has_content(path: Path) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _any_caption_sidecar(output_path: Path) -> bool:
+    for ext in (".vtt", ".srt", ".ass"):
+        if _sidecar_has_content(output_path.with_suffix(ext)):
+            return True
+    return False
+
+
 def build_ffmpeg_argv(
     *,
     stream_url: str,
@@ -108,6 +126,7 @@ def build_ffmpeg_argv(
     duration_text: str,
     user_agent: str = "",
     referer: str = "",
+    download_captions: bool = False,
 ) -> list[str]:
     sec = parse_duration(duration_text)
     ff = ffmpeg_exe()
@@ -139,7 +158,113 @@ def build_ffmpeg_argv(
         "-y",
         str(output_path),
     ]
+    if download_captions:
+        args += [
+            "-map",
+            "0:s:0?",
+            "-c",
+            "copy",
+            "-t",
+            str(sec),
+            "-y",
+            str(caption_sidecar_path(output_path)),
+        ]
     return args
+
+
+def _caption_ext_for_codec(codec: str) -> str:
+    c = codec.lower()
+    if c == "webvtt":
+        return ".vtt"
+    if c == "subrip":
+        return ".srt"
+    if c == "ass":
+        return ".ass"
+    if c:
+        return ".srt"
+    return ".vtt"
+
+
+def probe_subtitle_codec(media_path: Path) -> str:
+    fp = ffprobe_exe()
+    if not fp.is_file():
+        return ""
+    p = subprocess.run(
+        [
+            str(fp),
+            "-v",
+            "error",
+            "-select_streams",
+            "s:0",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(media_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if p.returncode != 0:
+        return ""
+    return (p.stdout or "").strip()
+
+
+def build_extract_captions_argv(ts_path: Path, codec: str) -> list[str]:
+    ff = ffmpeg_exe()
+    ext = _caption_ext_for_codec(codec)
+    out_path = ts_path.with_suffix(ext)
+    return [
+        str(ff),
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-i",
+        str(ts_path),
+        "-map",
+        "0:s:0?",
+        "-c",
+        "copy",
+        "-y",
+        str(out_path),
+    ]
+
+
+def try_extract_captions_from_ts(ts_path: Path, *, log_file: Path | None = None) -> bool:
+    codec = probe_subtitle_codec(ts_path)
+    if not codec:
+        return False
+    argv = build_extract_captions_argv(ts_path, codec)
+    code = run_ffmpeg(argv, log_file=log_file)
+    if code != 0:
+        return False
+    out_path = Path(argv[-1])
+    return _sidecar_has_content(out_path)
+
+
+def maybe_post_extract_captions(
+    output_path: Path,
+    *,
+    download_captions: bool,
+    log_file: Path | None = None,
+) -> None:
+    if not download_captions:
+        return
+    if _any_caption_sidecar(output_path):
+        return
+    if output_path.suffix.lower() != ".ts":
+        return
+    if not output_path.is_file():
+        return
+    if try_extract_captions_from_ts(output_path, log_file=log_file):
+        return
+    msg = "captions: none found in stream or recording\n"
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(msg)
+    else:
+        print(msg, end="", file=sys.stderr)
 
 
 def run_ffmpeg(argv: list[str], *, log_file: Path | None = None) -> int:
