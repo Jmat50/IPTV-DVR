@@ -85,7 +85,7 @@ func warnConsoleIsProtected(hwnd syscall.Handle) {
 		base = strings.TrimSpace(syscall.UTF16ToString(titleBuf[:n]))
 	}
 	if !strings.Contains(strings.ToLower(base), "[protected]") {
-		newTitle, err := syscall.UTF16PtrFromString(base + " [PROTECTED - DO NOT CLOSE]")
+		newTitle, err := syscall.UTF16PtrFromString(base + " [FFmpeg - PROTECTED - do not close]")
 		if err == nil {
 			procSetWindowTextW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(newTitle)))
 		}
@@ -96,7 +96,7 @@ func warnConsoleIsProtected(hwnd syscall.Handle) {
 		return
 	}
 	procAppendMenuW.Call(menu, uintptr(mfSeparator), 0, 0)
-	disabledTxt, err := syscall.UTF16PtrFromString("Close disabled during active recording")
+	disabledTxt, err := syscall.UTF16PtrFromString("Close disabled while FFmpeg is recording")
 	if err != nil {
 		return
 	}
@@ -122,7 +122,8 @@ func armConsoleClose(pid int) {
 }
 
 // Run starts FFmpeg in a dedicated console window and applies the same close-button
-// and title/menu protections as gui/recorder.py (Windows only).
+// and title/menu protections as gui/recorder.py (Windows only). Only that FFmpeg child
+// process console is touched; host apps (Tkinter, cmd shells) are unaffected.
 func Run(argv []string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("empty argv")

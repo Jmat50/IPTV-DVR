@@ -37,22 +37,24 @@ iptv-gui.exe run-job --job-id <uuid>
 
 ## FFmpeg console and accidental close (Windows)
 
-While a recording **FFmpeg** process is running, the app tries to prevent **accidentally closing its console** from the window chrome (same behavior for the GUI pipeline and the Go CLI on Windows):
+**Scope:** safeguards apply **only** to the **Windows console window owned by each FFmpeg subprocess** that the app starts (located by FFmpeg's process ID + `ConsoleWindowClass`). Anything that **does not** terminate that FFmpeg process is **not** locked down—including the **Tkinter main window**, dialogs (`Job Editor`, channel picker, wake settings), and other apps (`VLC`, etc.). You may close the GUI and leave a **detached** `run-job`/`Run selected job now` recording running; FFmpeg still gets these protections inside its own console.
 
-- **Remove the Close (X) control** from the system menu and **append a disabled** menu line: `Close disabled during active recording`.
-- **Adjust the window title** to append ` [PROTECTED - DO NOT CLOSE]` when that marker is not already present (Python mirrors the same string checks as in [`gui/recorder.py`](gui/recorder.py); Go uses [`internal/winffmpeg`](internal/winffmpeg/run_windows.go)).
+While that FFmpeg runs, User32 tweaks on **that console only**:
+
+- Remove the Close item from its **system menu** and append a grayed/disabled entry: `Close disabled while FFmpeg is recording`.
+- Append to the console **title**: ` [FFmpeg - PROTECTED - do not close]` unless a `[protected]` marker is already in the title (same logic in [`gui/recorder.py`](gui/recorder.py) and [`internal/winffmpeg`](internal/winffmpeg/run_windows.go)).
 
 **Where this applies**
 
 | Path | Mechanism |
 |------|-----------|
-| GUI **Test 15s capture**, **Run job** (`run-job`) | [`gui/recorder.py`](gui/recorder.py) `run_ffmpeg` starts FFmpeg with piped output and arms the guard on the child **PID** (polls up to ~5s for a `ConsoleWindowClass` window). |
+| GUI **Test 15s capture**, **Run job** (`run-job`) | [`gui/recorder.py`](gui/recorder.py) `run_ffmpeg` starts FFmpeg with piped output and arms the guard on the FFmpeg child **PID** (polls up to ~5s for a `ConsoleWindowClass` window). |
 | **`iptvrecord record`** and post-record caption extract | [`internal/winffmpeg`](internal/winffmpeg/run_windows.go) starts FFmpeg with **`CREATE_NEW_CONSOLE`** so the subprocess owns its console, applies the same User32 steps, then waits. |
 | **macOS / Linux** (`iptvrecord` on non-Windows) | No console guard; plain `exec` with inherited stdio. |
 
 **`iptvrecord` from `cmd` or PowerShell:** FFmpeg opens in a **separate** console window (so the guard can attach reliably). Your shell still prints the `running: ffmpeg ...` line; FFmpeg progress and messages appear in the FFmpeg window.
 
-**Not prevented:** Task Manager, `taskkill`, killing the parent process, or loss of console visibility (e.g. some redirected / service contexts).
+**Not prevented:** Task Manager, `taskkill`, killing the parent Python/go host, closing the Tk UI, or contexts where no FFmpeg console HWND appears (piped/streaming services).
 
 ## Tkinter GUI (recurring schedules + M3U sources)
 

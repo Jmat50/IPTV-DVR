@@ -24,8 +24,10 @@ Project-level guidance for AI/code agents working in this repo.
 - On **Windows**, preserve parity between `gui/recorder.py` FFmpeg console protection and `internal/winffmpeg` (close menu, title suffix, disabled "Close disabled..." line, ~5s HWND poll / `CREATE_NEW_CONSOLE` for Go).
 
 ## FFmpeg console guard (Windows)
-- **`gui/recorder.py` `run_ffmpeg`:** After `Popen`, spawn a short-lived poll that finds the child process `ConsoleWindowClass` window and applies User32 (`GetSystemMenu`/`DeleteMenu` SC_CLOSE, `SetWindowTextW`, `AppendMenuW`). Used by `run-job`, test capture, and caption extract subprocesses.
-- **`internal/winffmpeg`:** Used by `iptvrecord record` and `TryExtractCaptionsFromTS`; starts FFmpeg with `CREATE_NEW_CONSOLE` then runs the same guard on the child's PID.
+- **`gui/recorder.py` `run_ffmpeg`:** After `Popen`, spawn a short-lived poll that finds the **FFmpeg child** `ConsoleWindowClass` HWND (matched by FFmpeg's PID) and applies User32 (`GetSystemMenu`/`DeleteMenu` SC_CLOSE, `SetWindowTextW`, `AppendMenuW`).
+- **`internal/winffmpeg`:** Used by `iptvrecord record` and `TryExtractCaptionsFromTS`; starts FFmpeg with `CREATE_NEW_CONSOLE` then runs the same guard on the FFmpeg child's PID.
+- **Never** attach this guard to the Tkinter GUI, **Job Editor**, or unrelated top-level HWNDs. Detached **`run-job`** recordings must keep running if the user closes the GUI; Tk `WM_DELETE_WINDOW` remains an ordinary quit (aside from persist/sync confirmations).
+- **Intent:** accidental-click protection targets **only** FFmpeg consoles tied to capture continuity; subtitle-extract FFmpeg runs are short-lived but still use the same guard while they run.
 - Changing either path: keep behavior aligned and update [README.md](README.md) "FFmpeg console and accidental close" if user-visible behavior changes.
 - Non-Windows: `winffmpeg` falls through to plain `exec` (no guard).
 

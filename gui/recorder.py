@@ -63,7 +63,7 @@ def _warn_console_is_protected(hwnd: int) -> None:
     user32.GetWindowTextW(hwnd, title, len(title))
     base = title.value.strip() or "FFmpeg"
     if "[protected]" not in base.lower():
-        user32.SetWindowTextW(hwnd, f"{base} [PROTECTED - DO NOT CLOSE]")
+        user32.SetWindowTextW(hwnd, f"{base} [FFmpeg - PROTECTED - do not close]")
 
     menu = user32.GetSystemMenu(hwnd, False)
     if menu:
@@ -76,7 +76,7 @@ def _warn_console_is_protected(hwnd: int) -> None:
             menu,
             mf_string | mf_disabled,
             0,
-            "Close disabled during active recording",
+            "Close disabled while FFmpeg is recording",
         )
         user32.DrawMenuBar(hwnd)
 
@@ -302,7 +302,11 @@ def maybe_post_extract_captions(
 
 
 def run_ffmpeg(argv: list[str], *, log_file: Path | None = None) -> int:
-    """Run ffmpeg; stream stdout/stderr to log_file if set. Returns process return code."""
+    """Run ffmpeg; stream stdout/stderr to log_file if set. Returns process return code.
+
+    On Windows, accidental-close safeguards apply only to this FFmpeg child's console HWND
+    (identified by FFmpeg's PID); the Tk GUI and other windows are not modified.
+    """
     log_fp = None
     try:
         if log_file:
