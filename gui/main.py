@@ -38,10 +38,17 @@ from paths import (
     log_dir,
     project_root,
 )
+from caption_finalize import finalize_captions, should_dual_output_vtt
+from caption_mode import (
+    migrate_caption_mode,
+    normalize_caption_mode,
+    resolve_caption_mode,
+    use_live_ccextractor,
+)
+from caption_worker import LiveCaptionWorker
 from recorder import (
     build_ffmpeg_argv,
     caption_sidecar_path,
-    maybe_post_extract_captions,
     run_ffmpeg,
 )
 from scheduler_win import (
@@ -736,6 +743,10 @@ class App(tk.Tk):
         out = Path(tempfile.gettempdir()) / f"iptv_test_{j.id[:8]}.ts"
         ua = j.user_agent or ch.user_agent
         ref = j.referer or ch.referer
+        caption_mode = migrate_caption_mode(
+            caption_mode=getattr(j, "caption_mode", None),
+            download_captions=j.download_captions,
+        )
         try:
             argv = build_ffmpeg_argv(
                 stream_url=ch.url,
@@ -743,16 +754,34 @@ class App(tk.Tk):
                 duration_text="15s",
                 user_agent=ua,
                 referer=ref,
-                download_captions=j.download_captions,
+                download_captions=caption_mode != "off",
+                dual_output_vtt=should_dual_output_vtt(
+                    caption_mode,
+                    stream_url=ch.url,
+                    user_agent=ua,
+                    referer=ref,
+                ),
             )
         except Exception as e:
             messagebox.showerror("Test", str(e))
             return
         self.config(cursor="watch")
         self.update_idletasks()
+        live_worker: LiveCaptionWorker | None = None
+        if use_live_ccextractor(caption_mode, out):
+            live_worker = LiveCaptionWorker(out, log_file=None)
+            if not live_worker.start():
+                live_worker = None
         code = run_ffmpeg(argv, log_file=None)
+        live_ok = False
+        if live_worker is not None:
+            live_ok = live_worker.stop_and_finalize()
         if code == 0:
-            maybe_post_extract_captions(out, download_captions=j.download_captions)
+            finalize_captions(
+                out,
+                resolve_caption_mode(caption_mode, out),
+                live_ok=live_ok,
+            )
         self.config(cursor="")
         if code == 0:
             cap_note = ""
@@ -868,12 +897,28 @@ class JobEditor(tk.Toplevel):
         self.en_v = en_v
         ttk.Checkbutton(f, text="Enabled", variable=en_v).grid(row=8, column=1, sticky=tk.W, pady=2)
 
-        self.captions_v = tk.BooleanVar(value=job.download_captions if job else False)
-        ttk.Checkbutton(
-            f,
-            text="Download closed captions (.srt sidecar for Jellyfin, etc.)",
-            variable=self.captions_v,
-        ).grid(row=9, column=1, sticky=tk.W, pady=2)
+        cap_default = "off"
+        if job:
+            cap_default = normalize_caption_mode(
+                getattr(job, "caption_mode", None)
+                or ("auto" if job.download_captions else "off"),
+            )
+        self.caption_mode_v = tk.StringVar(value=cap_default)
+        cap_fr = ttk.Frame(f)
+        cap_fr.grid(row=9, column=1, sticky=tk.W, pady=2)
+        ttk.Label(cap_fr, text="Captions").pack(side=tk.LEFT)
+        ttk.Combobox(
+            cap_fr,
+            textvariable=self.caption_mode_v,
+            values=["off", "auto", "post_only", "live_ccextractor"],
+            width=18,
+            state="readonly",
+        ).pack(side=tk.LEFT, padx=6)
+        ttk.Label(
+            cap_fr,
+            text="auto = live .srt when CCExtractor installed",
+            font=("TkDefaultFont", 8),
+        ).pack(side=tk.LEFT)
 
         fmt_fr = ttk.Frame(f)
         fmt_fr.grid(row=10, column=1, sticky=tk.W, pady=2)
@@ -989,7 +1034,9 @@ class JobEditor(tk.Toplevel):
         j.filename_pattern = f"{base}.{selected_fmt}"
         j.output_format = selected_fmt
         j.enabled = self.en_v.get()
-        j.download_captions = self.captions_v.get()
+        cap_mode = normalize_caption_mode(self.caption_mode_v.get())
+        j.caption_mode = cap_mode
+        j.download_captions = cap_mode != "off"
         j.schedule.mode = "daily" if mode == "daily" else "weekly"
         j.schedule.days = [] if mode == "daily" else days
         j.schedule.hour = hour

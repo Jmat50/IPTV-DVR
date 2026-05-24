@@ -44,4 +44,21 @@ def log_dir() -> Path:
 
 
 def tools_dir() -> Path:
-    return project_root() / "tools"
+    d = project_root() / "tools"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def ccextractor_exe() -> Path:
+    root = project_root()
+    if is_frozen():
+        candidates = [root / "tools" / "ccextractor" / "ccextractor.exe"]
+    else:
+        candidates = [
+            root / "gui" / "tools" / "ccextractor" / "ccextractor.exe",
+            root / "tools" / "ccextractor" / "ccextractor.exe",
+        ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    return candidates[0]

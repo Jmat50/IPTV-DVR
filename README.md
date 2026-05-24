@@ -12,6 +12,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\download_ffmpeg.ps1
 
 This downloads a Windows x64 **GPL** build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (see [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html)). While recording, the GUI uses the Windows console safeguards described under [FFmpeg console and accidental close](#ffmpeg-console-and-accidental-close-windows).
 
+## Embedded CCExtractor (optional, live captions)
+
+For **live** `.srt` sidecars while a `.ts` records, install [CCExtractor](https://github.com/CCExtractor/ccextractor) next to the app:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\download_ccextractor.ps1
+```
+
+This places `ccextractor.exe` under `gui\tools\ccextractor\` (dev) or `tools\ccextractor\` beside `iptv-gui.exe` (frozen). With **Captions = auto** or **live_ccextractor**, the app runs CCExtractor in stream mode on the growing file and finalizes `recording.srt` when the record ends. If CCExtractor is missing, **auto** falls back to post-record FFmpeg extraction.
+
 ## Build standalone GUI (`gui\iptv-gui.exe`)
 
 From the repo root (installs/updates PyInstaller via pip, then builds a **one-file, windowed** executable into **`gui\iptv-gui.exe`**). Close any running `gui\iptv-gui.exe` before rebuilding.
@@ -66,7 +76,7 @@ While that FFmpeg runs, User32 tweaks on **that console only**:
   `"…\gui\iptv-gui.exe" run-job --job-id <uuid>` (frozen build), with working directory set accordingly.
 - **Run selected job now** starts the selected job immediately in background (handy for validation before waiting on a schedule).
 - **Test 15s capture** uses the selected job’s source/channel.
-- Optional per job: **download closed captions when available** mirrors the CLI `--captions` flag (see [Closed captions](#closed-captions) below).
+- Optional per job: **Captions** mode (`off`, `auto`, `post_only`, `live_ccextractor`) — see [Closed captions](#closed-captions). Legacy configs with **download closed captions** enabled map to `auto`.
 
 Run (Python 3.10+ with Tk on Windows):
 
@@ -121,10 +131,11 @@ Optional overrides:
 .\iptvrecord.exe record ... --ffmpeg "C:\ffmpeg\bin\ffmpeg.exe" --user-agent "VLC/3.0" --referer "https://provider/"
 ```
 
-Add a sidecar when the manifest exposes subtitle streams (`--captions`):
+Enable captions (`--captions` is shorthand for `--caption-mode auto`):
 
 ```powershell
 .\iptvrecord.exe record ... --out D:\rec.ts --captions
+.\iptvrecord.exe record ... --out D:\rec.ts --caption-mode live_ccextractor --ccextractor C:\tools\ccextractor.exe
 ```
 
 ### Schedule once (Task Scheduler)
@@ -157,14 +168,21 @@ ffmpeg -i recorded.ts -c copy recorded.mp4
 
 ## Closed captions
 
-Recording uses **stream copy** (`-c copy`) for video and audio. Caption behavior depends on how the broadcaster delivers them:
+Recording uses **stream copy** (`-c copy`) for video and audio. Caption behavior depends on mode and how the broadcaster delivers captions:
 
-| Delivery | What you get in `.ts` | Sidecar `.vtt` / `--captions` |
-|----------|------------------------|------------------------------|
-| **Embedded in video** (CEA-608 / ATSC A53 in H.264) | Caption data stays **in the video elementary stream** (VLC can show CC). With **download closed captions** enabled, the app **post-extracts** an `.srt` sidecar after the `.ts` finishes (FFmpeg `movie=…[out+subcc]`; decodes the full recording, so allow extra time on long shows). | Enable **download closed captions** on the job or `--captions` on the CLI. Jellyfin/Plex-style libraries pick up the matching `.srt` on library scan. |
-| **HLS subtitles** (distinct WebVTT / subtitle playlists) | Main output is still video+audio copy; a `.vtt` sidecar is written when the live URL exposes a subtitle stream. | Same flag; muxed subtitle copy is tried first, then embedded-608 extract for `.ts`. |
+| Mode | Behavior |
+|------|----------|
+| `off` | No sidecar work. |
+| `post_only` | After record: muxed subtitle copy, then FFmpeg embedded-608 extract to `.srt` (`.ts` only). |
+| `live_ccextractor` | During record: CCExtractor stream mode writes `.srt.partial` → validated `.srt` on finish; post-extract fallback if live output is empty. |
+| `auto` | `live_ccextractor` when CCExtractor is installed and output is `.ts`; otherwise `post_only`. |
 
-**Practical takeaway:** For **broadcast-style embedded CC** (common on live TV), turn on **download closed captions** so each finished `.ts` gets a same-basename `.srt` without a manual FFmpeg step.
+| Delivery | What you get in `.ts` | Sidecar |
+|----------|------------------------|---------|
+| **Embedded in video** (CEA-608 / ATSC A53) | CC stays in H.264 (VLC can show CC). | Live `.srt` while recording (CCExtractor) or post-extract `.srt` (FFmpeg). |
+| **HLS subtitles** (WebVTT renditions) | Video+audio copy. | Live `.vtt` when ffprobe sees a subtitle stream; post muxed copy otherwise. |
+
+**Practical takeaway:** Set job **Captions** to **auto**, run `download_ccextractor.ps1` once, and use `.ts` output for broadcast IPTV — you get a Jellyfin-ready `.srt` beside each recording without a manual FFmpeg step.
 
 **Playlist tip:** If an M3U lists the same channel name more than once, the app matches **the first** matching entry (`#EXTINF` then URL).
 

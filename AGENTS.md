@@ -37,9 +37,12 @@ Project-level guidance for AI/code agents working in this repo.
 - Scheduler-related changes: verify wake settings (`WakeToRun`) and no regression in `run-job` args.
 
 ## Captions
-- Recordings use FFmpeg **stream copy** (`-c copy`) for video/audio. **CEA-608 / ATSC A53 closed captions carried inside the H.264 bitstream** normally stay embedded in the output `.ts`; no sidecar is required for players (e.g. VLC) that decode CC from the video track.
-- **Separate HLS subtitle renditions** (`#EXT-X-MEDIA:TYPE=SUBTITLES`, WebVTT segments) are optional: the job/CLI **download captions** path can write a `.vtt` sidecar when ffprobe sees a subtitle stream on the input URL, plus a post-record extract when the finished `.ts` exposes a muxed subtitle stream. It does **not** re-embed WebVTT into the video elementary stream by default.
-- **Post-record embedded 608 extract:** When download captions is enabled and no sidecar exists yet, after a `.ts` record try muxed `-map 0:s:0?` copy first, then FFmpeg `movie='basename.ts'[out+subcc]` → `.srt` (run with cwd = recording dir; matches Jellyfin external subs). This decodes the full file; not part of the live `-c copy` record argv.
+- Recordings use FFmpeg **stream copy** (`-c copy`) for video/audio. **CEA-608 / ATSC A53** in H.264 stay in the `.ts` unless a sidecar is requested.
+- **Caption modes** (`off`, `post_only`, `live_ccextractor`, `auto`): jobs store `caption_mode`; legacy `download_captions: true` migrates to `auto`. **`auto`** uses **CCExtractor** live on `.ts` when `gui/tools/ccextractor/ccextractor.exe` (or frozen `tools/ccextractor/`) exists; otherwise **post_only**.
+- **Live path (Option 2):** `gui/caption_worker.py` and `internal/ccextractor` run `ccextractor -s -out=srt` on the growing recording, write `.srt.partial`, validate, then atomically rename to `.srt`. FFmpeg recording is unchanged; only FFmpeg consoles get the Windows guard (not CCExtractor).
+- **HLS subtitle renditions:** when ffprobe sees `0:s:0?`, dual-output still writes `.vtt` during record (`-c copy`).
+- **Post-record fallback:** muxed `-map 0:s:0?` copy, then FFmpeg `movie='basename.ts'[out+subcc]` → `.srt` (cwd = recording dir) if live worker did not produce a valid sidecar.
+- Install CCExtractor: `scripts/download_ccextractor.ps1` (optional; required for live mode).
 - M3U `find_channel` resolves **exact name first**, otherwise **unique substring**. Duplicate `#EXTINF` lines with the same title use the **first** URL line in playlist order.
 
 ## Notes

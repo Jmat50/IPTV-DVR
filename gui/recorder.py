@@ -157,6 +157,7 @@ def build_ffmpeg_argv(
     user_agent: str = "",
     referer: str = "",
     download_captions: bool = False,
+    dual_output_vtt: bool | None = None,
 ) -> list[str]:
     sec = parse_duration(duration_text)
     ff = ffmpeg_exe()
@@ -188,7 +189,8 @@ def build_ffmpeg_argv(
         "-y",
         str(output_path),
     ]
-    if download_captions and probe_url_has_subtitles(
+    use_vtt = dual_output_vtt if dual_output_vtt is not None else download_captions
+    if use_vtt and probe_url_has_subtitles(
         stream_url,
         user_agent=user_agent,
         referer=referer,

@@ -13,7 +13,10 @@ from config_store import job_by_id, load_config, source_by_id
 from duration_parse import parse_duration
 from m3u_load import find_channel, load_m3u
 from paths import log_dir
-from recorder import build_ffmpeg_argv, maybe_post_extract_captions, run_ffmpeg
+from caption_finalize import finalize_captions, should_dual_output_vtt
+from caption_mode import migrate_caption_mode, resolve_caption_mode, use_live_ccextractor
+from caption_worker import LiveCaptionWorker
+from recorder import build_ffmpeg_argv, run_ffmpeg
 
 _JITTER_SECONDS = 8
 
@@ -198,6 +201,10 @@ def run_job(
         duration_text = resolved
     out = build_output_path(job)
     log_path = log_dir() / f"job_{job.id}.log"
+    caption_mode = migrate_caption_mode(
+        caption_mode=getattr(job, "caption_mode", None),
+        download_captions=job.download_captions,
+    )
     try:
         argv = build_ffmpeg_argv(
             stream_url=ch.url,
@@ -205,19 +212,38 @@ def run_job(
             duration_text=duration_text,
             user_agent=ua,
             referer=ref,
-            download_captions=job.download_captions,
+            download_captions=caption_mode != "off",
+            dual_output_vtt=should_dual_output_vtt(
+                caption_mode,
+                stream_url=ch.url,
+                user_agent=ua,
+                referer=ref,
+            ),
         )
     except Exception as e:
         print(f"build: {e}", file=sys.stderr)
         return 2
+
+    live_worker: LiveCaptionWorker | None = None
+    if use_live_ccextractor(caption_mode, out):
+        live_worker = LiveCaptionWorker(out, log_file=log_path)
+        if not live_worker.start():
+            live_worker = None
+
     code = run_ffmpeg(argv, log_file=log_path)
+    live_ok = False
+    if live_worker is not None:
+        live_ok = live_worker.stop_and_finalize()
+
     if code != 0:
         print(f"ffmpeg exited {code}; see {log_path}", file=sys.stderr)
         return code
-    maybe_post_extract_captions(
+
+    finalize_captions(
         out,
-        download_captions=job.download_captions,
+        resolve_caption_mode(caption_mode, out),
         log_file=log_path,
+        live_ok=live_ok,
     )
 
     return 0

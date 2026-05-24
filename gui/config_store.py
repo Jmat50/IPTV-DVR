@@ -8,11 +8,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from caption_mode import migrate_caption_mode, normalize_caption_mode
 from paths import config_file
 
 
 ScheduleMode = Literal["daily", "weekly"]
 OutputFormat = Literal["ts", "mp4", "mkv", "mov"]
+CaptionMode = Literal["off", "post_only", "live_ccextractor", "auto"]
 @dataclass
 class Source:
     id: str
@@ -45,7 +47,8 @@ class Job:
     user_agent: str = ""
     referer: str = ""
     enabled: bool = True
-    download_captions: bool = False
+    download_captions: bool = False  # legacy; mirrored when caption_mode != off
+    caption_mode: CaptionMode = "off"
     schedule: Schedule = field(default_factory=Schedule)
 
     @staticmethod
@@ -90,6 +93,11 @@ def _job_from_dict(d: dict[str, Any]) -> Job:
     output_format = str(d.get("output_format", "ts")).lower()
     if output_format not in ("ts", "mp4", "mkv", "mov"):
         output_format = "ts"
+    download_captions = bool(d.get("download_captions", False))
+    caption_mode = migrate_caption_mode(
+        caption_mode=d.get("caption_mode"),
+        download_captions=download_captions,
+    )
     return Job(
         id=d["id"],
         name=d.get("name", "Job"),
@@ -102,7 +110,8 @@ def _job_from_dict(d: dict[str, Any]) -> Job:
         user_agent=d.get("user_agent", ""),
         referer=d.get("referer", ""),
         enabled=bool(d.get("enabled", True)),
-        download_captions=bool(d.get("download_captions", False)),
+        download_captions=caption_mode != "off",
+        caption_mode=caption_mode,
         schedule=_schedule_from_dict(sch) if isinstance(sch, dict) else Schedule(),
     )
 
@@ -121,12 +130,20 @@ def load_config(path: Path | None = None) -> AppConfig:
     return AppConfig(version=int(data.get("version", 1)), sources=sources, jobs=jobs)
 
 
+def _job_to_dict(job: Job) -> dict[str, Any]:
+    d = asdict(job)
+    mode = normalize_caption_mode(job.caption_mode)
+    d["caption_mode"] = mode
+    d["download_captions"] = mode != "off"
+    return d
+
+
 def save_config(cfg: AppConfig, path: Path | None = None) -> None:
     p = path or config_file()
     payload: dict[str, Any] = {
         "version": cfg.version,
         "sources": [asdict(s) for s in cfg.sources],
-        "jobs": [asdict(j) for j in cfg.jobs],
+        "jobs": [_job_to_dict(j) for j in cfg.jobs],
     }
     p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"iptv-dvr/internal/ccextractor"
 	"iptv-dvr/internal/ffmpeg"
 	"iptv-dvr/internal/m3u"
 	"iptv-dvr/internal/winffmpeg"
@@ -49,7 +50,7 @@ Commands:
   record         (--m3u <file|url> --channel <name>)  OR  --url <stream-url>
                  --duration <e.g. 90m, 1h30m, 3600> --out <path.ts>
                  [--ffmpeg <path\to\ffmpeg.exe>] [--user-agent ...] [--referer ...]
-                 [--captions]
+                 [--captions] [--caption-mode off|post_only|live_ccextractor|auto]
   schedule       --at <RFC3339>  (same flags as record)
                  [--task-name <name>]
   version
@@ -96,6 +97,8 @@ type recordOpts struct {
 	referer        string
 	scheduledStart string
 	captions       bool
+	captionMode    string
+	ccExtractor    string
 }
 
 func parseRecordFlags(fs *flag.FlagSet, args []string) recordOpts {
@@ -109,9 +112,15 @@ func parseRecordFlags(fs *flag.FlagSet, args []string) recordOpts {
 	fs.StringVar(&o.userAgent, "user-agent", "", "override User-Agent")
 	fs.StringVar(&o.referer, "referer", "", "override Referer header")
 	fs.StringVar(&o.scheduledStart, "scheduled-start", "", "internal: planned schedule start time")
-	fs.BoolVar(&o.captions, "captions", false, "download closed captions to a .vtt sidecar when available")
+	fs.BoolVar(&o.captions, "captions", false, "enable closed captions (same as --caption-mode auto)")
+	fs.StringVar(&o.captionMode, "caption-mode", "", "off | post_only | live_ccextractor | auto")
+	fs.StringVar(&o.ccExtractor, "ccextractor", "", "path to ccextractor.exe (optional; bundled tools/ used when present)")
 	_ = fs.Parse(args)
 	return o
+}
+
+func captionModeForRecord(o recordOpts) ccextractor.Mode {
+	return ccextractor.MigrateMode(o.captionMode, o.captions)
 }
 
 func validateRecord(o recordOpts) error {
@@ -215,12 +224,12 @@ func runRecord(args []string) error {
 	if ff == "" {
 		ff = "ffmpeg"
 	}
+	mode := captionModeForRecord(o)
+	ccExe := ccextractor.ResolveExe(o.ccExtractor)
+	ffprobe := ffprobeFromFFmpeg(ff)
 	captionsPath := ""
-	if o.captions {
-		ffprobe := ffprobeFromFFmpeg(ff)
-		if ffmpeg.ProbeURLHasSubtitles(ffprobe, inputURL, ua, ref) {
-			captionsPath = ffmpeg.CaptionsSidecarPath(o.out)
-		}
+	if ccextractor.CaptionsEnabled(mode) && ffmpeg.ProbeURLHasSubtitles(ffprobe, inputURL, ua, ref) {
+		captionsPath = ffmpeg.CaptionsSidecarPath(o.out)
 	}
 	argv, err := ffmpeg.BuildArgv(ffmpeg.Args{
 		FFmpegPath:   ff,
@@ -235,20 +244,40 @@ func runRecord(args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "running: %s %s\n", argv[0], strings.Join(argv[1:], " "))
+
+	var worker *ccextractor.Worker
+	if ccextractor.UseLiveCCExtractor(mode, o.out, ccExe) {
+		worker = ccextractor.NewWorker(o.out, ccExe, os.Stderr)
+		if startErr := worker.Start(); startErr != nil {
+			fmt.Fprintf(os.Stderr, "captions: live worker start failed: %v\n", startErr)
+			worker = nil
+		}
+	}
+
 	if err := winffmpeg.Run(argv); err != nil {
 		return err
 	}
-	if o.captions {
-		ffprobe := ffprobeFromFFmpeg(ff)
-		if ffmpeg.SidecarHasContent(captionsPath) || ffmpeg.AnyCaptionSidecar(o.out) {
-			return nil
+
+	liveOK := false
+	if worker != nil {
+		var stopErr error
+		liveOK, stopErr = worker.Stop()
+		if !liveOK && stopErr != nil {
+			fmt.Fprintf(os.Stderr, "captions: live worker stop: %v\n", stopErr)
 		}
-		ok, extractErr := ffmpeg.PostExtractCaptions(ff, ffprobe, o.out)
-		if extractErr != nil {
-			fmt.Fprintf(os.Stderr, "caption extract: %v\n", extractErr)
-		} else if !ok {
-			fmt.Fprintln(os.Stderr, "captions: none found in stream or recording")
-		}
+	}
+
+	if !ccextractor.CaptionsEnabled(mode) {
+		return nil
+	}
+	if ffmpeg.SidecarHasContent(captionsPath) || ffmpeg.AnyCaptionSidecar(o.out) {
+		return nil
+	}
+	ok, extractErr := ffmpeg.FinalizeCaptions(ff, ffprobe, o.out, mode, liveOK, os.Stderr)
+	if extractErr != nil {
+		fmt.Fprintf(os.Stderr, "caption extract: %v\n", extractErr)
+	} else if !ok {
+		fmt.Fprintln(os.Stderr, "captions: none found in stream or recording")
 	}
 	return nil
 }

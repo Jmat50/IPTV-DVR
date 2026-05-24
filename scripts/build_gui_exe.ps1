@@ -52,7 +52,10 @@ $Hidden = @(
     "m3u_load",
     "recorder",
     "scheduler_win",
-    "job_runner"
+    "job_runner",
+    "caption_mode",
+    "caption_worker",
+    "caption_finalize"
 )
 $HiddenArgs = @()
 foreach ($m in $Hidden) { $HiddenArgs += "--hidden-import"; $HiddenArgs += $m }
