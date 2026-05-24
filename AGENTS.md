@@ -39,7 +39,7 @@ Project-level guidance for AI/code agents working in this repo.
 ## Captions
 - Recordings use FFmpeg **stream copy** (`-c copy`) for video/audio. **CEA-608 / ATSC A53 closed captions carried inside the H.264 bitstream** normally stay embedded in the output `.ts`; no sidecar is required for players (e.g. VLC) that decode CC from the video track.
 - **Separate HLS subtitle renditions** (`#EXT-X-MEDIA:TYPE=SUBTITLES`, WebVTT segments) are optional: the job/CLI **download captions** path can write a `.vtt` sidecar when ffprobe sees a subtitle stream on the input URL, plus a post-record extract when the finished `.ts` exposes a muxed subtitle stream. It does **not** re-embed WebVTT into the video elementary stream by default.
-- **Post-record extraction of 608-from-video** (e.g. `lavfi movie=...[out+subcc]`) is not in the primary record path unless explicitly implemented later; embedded-in-video preservation is satisfied by `-c copy` when the provider uses SEI/carried captions.
+- **Post-record embedded 608 extract:** When download captions is enabled and no sidecar exists yet, after a `.ts` record try muxed `-map 0:s:0?` copy first, then FFmpeg `movie='basename.ts'[out+subcc]` → `.srt` (run with cwd = recording dir; matches Jellyfin external subs). This decodes the full file; not part of the live `-c copy` record argv.
 - M3U `find_channel` resolves **exact name first**, otherwise **unique substring**. Duplicate `#EXTINF` lines with the same title use the **first** URL line in playlist order.
 
 ## Notes

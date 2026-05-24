@@ -243,14 +243,10 @@ func runRecord(args []string) error {
 		if ffmpeg.SidecarHasContent(captionsPath) || ffmpeg.AnyCaptionSidecar(o.out) {
 			return nil
 		}
-		if strings.EqualFold(filepath.Ext(o.out), ".ts") {
-			ok, extractErr := ffmpeg.TryExtractCaptionsFromTS(ff, ffprobe, o.out)
-			if extractErr != nil {
-				fmt.Fprintf(os.Stderr, "caption extract: %v\n", extractErr)
-			} else if !ok {
-				fmt.Fprintln(os.Stderr, "captions: none found in stream or recording")
-			}
-		} else if captionsPath != "" {
+		ok, extractErr := ffmpeg.PostExtractCaptions(ff, ffprobe, o.out)
+		if extractErr != nil {
+			fmt.Fprintf(os.Stderr, "caption extract: %v\n", extractErr)
+		} else if !ok {
 			fmt.Fprintln(os.Stderr, "captions: none found in stream or recording")
 		}
 	}

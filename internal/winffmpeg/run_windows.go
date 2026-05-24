@@ -125,11 +125,19 @@ func armConsoleClose(pid int) {
 // and title/menu protections as gui/recorder.py (Windows only). Only that FFmpeg child
 // process console is touched; host apps (Tkinter, cmd shells) are unaffected.
 func Run(argv []string) error {
+	return RunInDir("", argv)
+}
+
+// RunInDir is like Run but sets the child process working directory (e.g. for lavfi movie=basename.ts).
+func RunInDir(dir string, argv []string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("empty argv")
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin = os.Stdin
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: createNewConsole,
 	}

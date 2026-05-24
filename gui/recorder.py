@@ -276,6 +276,47 @@ def try_extract_captions_from_ts(ts_path: Path, *, log_file: Path | None = None)
     return _sidecar_has_content(out_path)
 
 
+def _movie_basename_for_lavfi(name: str) -> str:
+    return name.replace("'", r"\'")
+
+
+def build_extract_embedded_608_argv(ts_path: Path) -> tuple[list[str], Path]:
+    """Extract CEA-608 from H.264 in a .ts to .srt (lavfi movie basename; run with cwd=parent)."""
+    ff = ffmpeg_exe()
+    base = ts_path.name
+    out_name = ts_path.with_suffix(".srt").name
+    lavfi = f"movie='{_movie_basename_for_lavfi(base)}'[out+subcc]"
+    argv = [
+        str(ff),
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-f",
+        "lavfi",
+        "-i",
+        lavfi,
+        "-map",
+        "s",
+        "-c:s",
+        "srt",
+        "-y",
+        out_name,
+    ]
+    return argv, ts_path.parent
+
+
+def try_extract_embedded_608_from_ts(ts_path: Path, *, log_file: Path | None = None) -> bool:
+    if ts_path.suffix.lower() != ".ts":
+        return False
+    if _sidecar_has_content(ts_path.with_suffix(".srt")):
+        return True
+    argv, cwd = build_extract_embedded_608_argv(ts_path)
+    code = run_ffmpeg(argv, log_file=log_file, cwd=cwd)
+    if code != 0:
+        return False
+    return _sidecar_has_content(ts_path.with_suffix(".srt"))
+
+
 def maybe_post_extract_captions(
     output_path: Path,
     *,
@@ -292,6 +333,8 @@ def maybe_post_extract_captions(
         return
     if try_extract_captions_from_ts(output_path, log_file=log_file):
         return
+    if try_extract_embedded_608_from_ts(output_path, log_file=log_file):
+        return
     msg = "captions: none found in stream or recording\n"
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -301,7 +344,7 @@ def maybe_post_extract_captions(
         print(msg, end="", file=sys.stderr)
 
 
-def run_ffmpeg(argv: list[str], *, log_file: Path | None = None) -> int:
+def run_ffmpeg(argv: list[str], *, log_file: Path | None = None, cwd: Path | None = None) -> int:
     """Run ffmpeg; stream stdout/stderr to log_file if set. Returns process return code.
 
     On Windows, accidental-close safeguards apply only to this FFmpeg child's console HWND
@@ -314,14 +357,16 @@ def run_ffmpeg(argv: list[str], *, log_file: Path | None = None) -> int:
             log_fp = open(log_file, "a", encoding="utf-8")
             log_fp.write(f"\n---\n$ {' '.join(argv)}\n")
             log_fp.flush()
-        p = subprocess.Popen(
-            argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            text=True,
-            bufsize=1,
-        )
+        popen_kw: dict = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "stdin": subprocess.DEVNULL,
+            "text": True,
+            "bufsize": 1,
+        }
+        if cwd is not None:
+            popen_kw["cwd"] = str(cwd)
+        p = subprocess.Popen(argv, **popen_kw)
         _start_ffmpeg_console_close_guard(p.pid)
         assert p.stdout is not None
         for line in p.stdout:

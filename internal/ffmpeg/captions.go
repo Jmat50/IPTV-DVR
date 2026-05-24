@@ -143,3 +143,81 @@ func TryExtractCaptionsFromTS(ffmpegPath, ffprobePath, tsPath string) (bool, err
 	outPath := argv[len(argv)-1]
 	return SidecarHasContent(outPath), nil
 }
+
+// Embedded608SidecarPath returns the .srt path alongside a recording (broadcast CC in H.264).
+func Embedded608SidecarPath(outputPath string) string {
+	ext := filepath.Ext(outputPath)
+	if ext == "" {
+		return outputPath + ".srt"
+	}
+	return strings.TrimSuffix(outputPath, ext) + ".srt"
+}
+
+func movieBasenameForLavfi(name string) string {
+	return strings.ReplaceAll(name, "'", `\'`)
+}
+
+// BuildExtractEmbedded608Argv builds ffmpeg argv to extract ATSC/EIA-608 from H.264 in a .ts file.
+// Run with working directory set to the recording's parent and basenames in argv (lavfi movie= parsing).
+func BuildExtractEmbedded608Argv(ffmpegPath, tsPath string) ([]string, string, error) {
+	if tsPath == "" {
+		return nil, "", fmt.Errorf("missing input path")
+	}
+	exe := ffmpegPath
+	if exe == "" {
+		exe = "ffmpeg"
+	}
+	dir := filepath.Dir(tsPath)
+	base := filepath.Base(tsPath)
+	ext := filepath.Ext(base)
+	outBase := strings.TrimSuffix(base, ext) + ".srt"
+	lavfi := fmt.Sprintf("movie='%s'[out+subcc]", movieBasenameForLavfi(base))
+	argv := []string{
+		exe,
+		"-hide_banner",
+		"-loglevel", "warning",
+		"-f", "lavfi",
+		"-i", lavfi,
+		"-map", "s",
+		"-c:s", "srt",
+		"-y",
+		outBase,
+	}
+	return argv, dir, nil
+}
+
+// TryExtractEmbedded608FromTS extracts CEA-608 carried in the video elementary stream to .srt.
+func TryExtractEmbedded608FromTS(ffmpegPath, tsPath string) (bool, error) {
+	if !strings.EqualFold(filepath.Ext(tsPath), ".ts") {
+		return false, nil
+	}
+	if SidecarHasContent(Embedded608SidecarPath(tsPath)) {
+		return true, nil
+	}
+	argv, dir, err := BuildExtractEmbedded608Argv(ffmpegPath, tsPath)
+	if err != nil {
+		return false, err
+	}
+	if err := winffmpeg.RunInDir(dir, argv); err != nil {
+		return false, err
+	}
+	return SidecarHasContent(Embedded608SidecarPath(tsPath)), nil
+}
+
+// PostExtractCaptions runs after a successful .ts record when --captions is enabled.
+func PostExtractCaptions(ffmpegPath, ffprobePath, outputPath string) (bool, error) {
+	if AnyCaptionSidecar(outputPath) {
+		return true, nil
+	}
+	if !strings.EqualFold(filepath.Ext(outputPath), ".ts") {
+		return false, nil
+	}
+	ok, err := TryExtractCaptionsFromTS(ffmpegPath, ffprobePath, outputPath)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		return true, nil
+	}
+	return TryExtractEmbedded608FromTS(ffmpegPath, outputPath)
+}

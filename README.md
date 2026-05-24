@@ -161,10 +161,10 @@ Recording uses **stream copy** (`-c copy`) for video and audio. Caption behavior
 
 | Delivery | What you get in `.ts` | Sidecar `.vtt` / `--captions` |
 |----------|------------------------|------------------------------|
-| **Embedded in video** (CEA-608 / ATSC A53 in H.264) | Caption data stays **in the video elementary stream**. Players such as VLC can show CC (**often CC1**; CC2-CC4 services may appear empty.) | Not required for embedded captions. Optional feature does little unless a separate subtitle track exists on the manifest or later in the file. |
-| **HLS subtitles** (distinct WebVTT / subtitle playlists) | Main output is still video+audio copy; text is only in the `.ts` if you map that subtitle stream into the same multiplex (the app prefers a `.vtt` sidecar when enabled). | Enable **download closed captions** on the job, or `--captions` with the Go CLI; recording still succeeds when no subtitle stream is present (optional maps). |
+| **Embedded in video** (CEA-608 / ATSC A53 in H.264) | Caption data stays **in the video elementary stream** (VLC can show CC). With **download closed captions** enabled, the app **post-extracts** an `.srt` sidecar after the `.ts` finishes (FFmpeg `movie=…[out+subcc]`; decodes the full recording, so allow extra time on long shows). | Enable **download closed captions** on the job or `--captions` on the CLI. Jellyfin/Plex-style libraries pick up the matching `.srt` on library scan. |
+| **HLS subtitles** (distinct WebVTT / subtitle playlists) | Main output is still video+audio copy; a `.vtt` sidecar is written when the live URL exposes a subtitle stream. | Same flag; muxed subtitle copy is tried first, then embedded-608 extract for `.ts`. |
 
-**Practical takeaway:** Many IPTV feeds use **broadcast-style embedded CC**. You normally **do not need** a `.srt` or `.vtt` file unless you want subtitles as a separate file or the provider exposes them only as **HLS subtitle renditions**.
+**Practical takeaway:** For **broadcast-style embedded CC** (common on live TV), turn on **download closed captions** so each finished `.ts` gets a same-basename `.srt` without a manual FFmpeg step.
 
 **Playlist tip:** If an M3U lists the same channel name more than once, the app matches **the first** matching entry (`#EXTINF` then URL).
 

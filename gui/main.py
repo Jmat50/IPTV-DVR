@@ -871,7 +871,7 @@ class JobEditor(tk.Toplevel):
         self.captions_v = tk.BooleanVar(value=job.download_captions if job else False)
         ttk.Checkbutton(
             f,
-            text="Download closed captions when available",
+            text="Download closed captions (.srt sidecar for Jellyfin, etc.)",
             variable=self.captions_v,
         ).grid(row=9, column=1, sticky=tk.W, pady=2)
 
