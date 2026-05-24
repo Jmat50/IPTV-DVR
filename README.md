@@ -2,40 +2,34 @@
 
 Super lightweight utility to record a live stream from an M3U playlist (or a direct URL) using FFmpeg stream copy. This allows for lossless capture of a live stream without re-encoding.
 
-## Embedded FFmpeg (GUI)
+## Build (one command)
 
-The **Tkinter GUI** uses FFmpeg from `gui\ffmpeg\` (not committed to git). From the repo root:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\download_ffmpeg.ps1
-```
-
-This downloads a Windows x64 **GPL** build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (see [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html)). While recording, the GUI uses the Windows console safeguards described under [FFmpeg console and accidental close](#ffmpeg-console-and-accidental-close-windows).
-
-## Embedded CCExtractor (optional, live captions)
-
-For **live** `.srt` sidecars while a `.ts` records, install [CCExtractor](https://github.com/CCExtractor/ccextractor) next to the app:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\download_ccextractor.ps1
-```
-
-This places `ccextractor.exe` under `gui\tools\ccextractor\` (dev) or `tools\ccextractor\` beside `iptv-gui.exe` (frozen). With **Captions = auto** or **live_ccextractor**, the app runs CCExtractor in stream mode on the growing file and finalizes `recording.srt` when the record ends. If CCExtractor is missing, **auto** falls back to post-record FFmpeg extraction.
-
-## Build standalone GUI (`gui\iptv-gui.exe`)
-
-From the repo root (installs/updates PyInstaller via pip, then builds a **one-file, windowed** executable into **`gui\iptv-gui.exe`**). Close any running `gui\iptv-gui.exe` before rebuilding.
+From the repo root, this script downloads missing bundled tools (skips FFmpeg and CCExtractor when already installed), runs `go test` / `go build`, and produces **`iptvrecord.exe`** and **`gui\iptv-gui.exe`**. Close any running `gui\iptv-gui.exe` before rebuilding.
 
 ```powershell
 cd "C:\Visual Studio\IPTV-DVR"
-powershell -ExecutionPolicy Bypass -File .\scripts\build_gui_exe.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
 ```
 
-Manual PyInstaller: use the same flags as [`scripts/build_gui_exe.ps1`](scripts/build_gui_exe.ps1) (notably `--paths .\gui` and `--hidden-import` for each module in `gui\` that `main.py` imports).
+Optional flags: `-SkipGo`, `-SkipGui`, `-SkipCCExtractor`, `-SkipTests`, `-ForceFfmpeg`, `-ForceCCExtractor`. [`scripts/build_gui_exe.ps1`](scripts/build_gui_exe.ps1) calls the same script for backward compatibility.
 
-After building, place **`ffmpeg.exe`** where the app can find it:
+Manual downloads (only if you are not using `build.ps1`):
 
-- `gui\ffmpeg\ffmpeg.exe`
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\download_ffmpeg.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\download_ccextractor.ps1
+```
+
+## Bundled runtime tools (GUI)
+
+The **Tkinter GUI** and frozen **`iptv-gui.exe`** expect:
+
+| Tool | Path (dev) | Notes |
+|------|------------|--------|
+| FFmpeg | `gui\ffmpeg\ffmpeg.exe` | GPL build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds); see [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html). |
+| CCExtractor (optional) | `gui\tools\ccextractor\ccextractor.exe` | Live `.srt` during `.ts` record; **Captions = auto** falls back to post-record FFmpeg if missing. |
+
+While recording, the GUI uses the Windows console safeguards described under [FFmpeg console and accidental close](#ffmpeg-console-and-accidental-close-windows).
 
 Headless recording for Task Scheduler uses the same executable:
 
@@ -93,8 +87,9 @@ python .\gui\main.py
 
 ## Install (from source)
 
+Use [`scripts/build.ps1`](#build-one-command) for `iptvrecord.exe` and the GUI, or build the CLI only:
+
 ```powershell
-cd "C:\Visual Studio\IPTV-DVR"
 go build -o iptvrecord.exe ./cmd/iptvrecord
 ```
 
