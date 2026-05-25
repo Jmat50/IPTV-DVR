@@ -769,6 +769,9 @@ class App(tk.Tk):
         self.update_idletasks()
         live_worker: LiveCaptionWorker | None = None
         if use_live_ccextractor(caption_mode, out):
+            # Avoid reading stale previous sample content when filename repeats.
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(b"")
             live_worker = LiveCaptionWorker(out, log_file=None)
             if not live_worker.start():
                 live_worker = None

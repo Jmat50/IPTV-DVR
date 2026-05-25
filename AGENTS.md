@@ -30,6 +30,7 @@ Project-level guidance for AI/code agents working in this repo.
 - **Intent:** accidental-click protection targets **only** FFmpeg consoles tied to capture continuity; subtitle-extract FFmpeg runs are short-lived but still use the same guard while they run.
 - Changing either path: keep behavior aligned and update [README.md](README.md) "FFmpeg console and accidental close" if user-visible behavior changes.
 - Non-Windows: `winffmpeg` falls through to plain `exec` (no guard).
+- Manual user stop contract: when FFmpeg exits with a user-stop code (for example `STATUS_CONTROL_C_EXIT`) but output has data, treat run as successful early stop after repair/finalize; do not leave a false failure marker.
 
 ## Validation Before Finishing
 - Python changes: `python -m compileall gui`
@@ -39,10 +40,22 @@ Project-level guidance for AI/code agents working in this repo.
 ## Captions
 - Recordings use FFmpeg **stream copy** (`-c copy`) for video/audio. **CEA-608 / ATSC A53** in H.264 stay in the `.ts` unless a sidecar is requested.
 - **Caption modes** (`off`, `post_only`, `live_ccextractor`, `auto`): jobs store `caption_mode`; legacy `download_captions: true` migrates to `auto`. **`auto`** uses **CCExtractor** live on `.ts` when `gui/tools/ccextractor/ccextractor.exe` (or frozen `tools/ccextractor/`) exists; otherwise **post_only**.
-- **Live path (Option 2):** `gui/caption_worker.py` and `internal/ccextractor` run `ccextractor -s -out=srt` on the growing recording, write `.srt.partial`, validate, then atomically rename to `.srt`. FFmpeg recording is unchanged; only FFmpeg consoles get the Windows guard (not CCExtractor).
+- **Live path (Option 2):** `gui/caption_worker.py` and `internal/ccextractor` run `ccextractor --stream 15 -out=srt` on the growing recording, write `.srt.partial`, validate, then atomically rename to `.srt`. FFmpeg recording is unchanged; only FFmpeg consoles get the Windows guard (not CCExtractor).
 - **HLS subtitle renditions:** when ffprobe sees `0:s:0?`, dual-output still writes `.vtt` during record (`-c copy`).
 - **Post-record fallback:** muxed `-map 0:s:0?` copy, then FFmpeg `movie='basename.ts'[out+subcc]` → `.srt` (cwd = recording dir) if live worker did not produce a valid sidecar.
-- Install CCExtractor: `scripts/download_ccextractor.ps1` (optional; required for live mode).
+- Install CCExtractor: `scripts/download_ccextractor.ps1` (optional; required for live mode). Runtime must include `ccextractor.exe` and sibling DLLs (notably `libgpac.dll`).
+- Build/install scripts should treat CCExtractor as present only when runtime DLLs are present; avoid skipping a partial install.
+- For `.ts` outputs that end non-zero with bytes present, run repair/remux before caption finalize:
+  - `-fflags +genpts+discardcorrupt`
+  - `-err_detect ignore_err`
+  - `-avoid_negative_ts make_zero`
+  - `-bsf:v setts=pts=N/(avg_frame_rate*TB):dts=N/(avg_frame_rate*TB)`
+- Keep Python/Go parity for manual-stop detection (`3221225786`, `-1073741510`, `130`) and "keep partial recording" behavior.
+- If embedded CC is visible in VLC but `.srt` is missing, inspect `gui/logs/job_<id>.log` for:
+  - `captions: live worker produced no valid SRT`
+  - `a value is required for '--stream <STREAM>'` (wrong worker args)
+  - `libgpac.dll was not found` (broken runtime install)
+  - HLS input failures (`Error reading HTTP response: End of file`, parse playlist errors)
 - M3U `find_channel` resolves **exact name first**, otherwise **unique substring**. Duplicate `#EXTINF` lines with the same title use the **first** URL line in playlist order.
 
 ## Notes

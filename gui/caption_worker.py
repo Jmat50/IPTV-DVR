@@ -6,7 +6,6 @@ import re
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 
 from paths import ccextractor_exe
@@ -29,11 +28,12 @@ def build_ccextractor_argv(recording_path: Path, partial_path: Path) -> list[str
     exe = ccextractor_exe()
     return [
         str(exe),
-        "-s",
-        "-out=srt",
-        str(recording_path),
+        "--stream",
+        "15",
+        "--out=srt",
         "-o",
         str(partial_path),
+        str(recording_path),
     ]
 
 
@@ -87,18 +87,6 @@ class LiveCaptionWorker:
         else:
             print(line, end="", file=sys.stderr)
 
-    def _wait_for_recording_start(self) -> bool:
-        deadline = time.monotonic() + self.start_timeout_s
-        while time.monotonic() < deadline:
-            try:
-                if self.recording_path.is_file() and self.recording_path.stat().st_size > 0:
-                    return True
-            except OSError:
-                pass
-            time.sleep(self.poll_interval_s)
-        self._log("captions: timed out waiting for recording file to appear")
-        return False
-
     def _drain_output(self) -> None:
         proc = self._proc
         if proc is None or proc.stdout is None:
@@ -114,8 +102,6 @@ class LiveCaptionWorker:
                 f"captions: CCExtractor not found at {ccextractor_exe()} "
                 "(run scripts\\download_ccextractor.ps1)",
             )
-            return False
-        if not self._wait_for_recording_start():
             return False
         try:
             if self.partial_path.is_file():

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -247,6 +249,10 @@ func runRecord(args []string) error {
 
 	var worker *ccextractor.Worker
 	if ccextractor.UseLiveCCExtractor(mode, o.out, ccExe) {
+		// Ensure live extractor follows this run's file, not stale content.
+		if mkErr := os.MkdirAll(filepath.Dir(o.out), 0o755); mkErr == nil {
+			_ = os.WriteFile(o.out, []byte{}, 0o644)
+		}
 		worker = ccextractor.NewWorker(o.out, ccExe, os.Stderr)
 		if startErr := worker.Start(); startErr != nil {
 			fmt.Fprintf(os.Stderr, "captions: live worker start failed: %v\n", startErr)
@@ -255,6 +261,29 @@ func runRecord(args []string) error {
 	}
 
 	if err := winffmpeg.Run(argv); err != nil {
+		// If ffmpeg failed before writing payload, remove empty placeholder output.
+		outSize := int64(0)
+		if st, statErr := os.Stat(o.out); statErr == nil {
+			outSize = st.Size()
+			if outSize == 0 {
+				_ = os.Remove(o.out)
+			}
+		}
+		// If ffmpeg wrote bytes but exited non-zero (manual close / stream break),
+		// normalize the partial TS so strict players can still open it.
+		if outSize > 0 {
+			_ = ffmpeg.TryRepairTSFile(ff, o.out, os.Stderr)
+		}
+		// If partial recording exists and captions were enabled, still try caption finalize.
+		mode := captionModeForRecord(o)
+		if outSize > 0 && ccextractor.CaptionsEnabled(mode) {
+			ffprobe := ffprobeFromFFmpeg(ff)
+			_, _ = ffmpeg.FinalizeCaptions(ff, ffprobe, o.out, mode, false, os.Stderr)
+		}
+		if outSize > 0 && isManualStopErr(err) {
+			fmt.Fprintln(os.Stderr, "ffmpeg stopped by user; keeping partial recording")
+			return nil
+		}
 		return err
 	}
 
@@ -287,6 +316,15 @@ func ffprobeFromFFmpeg(ffmpegPath string) string {
 		return "ffprobe"
 	}
 	return filepath.Join(filepath.Dir(ffmpegPath), "ffprobe"+filepath.Ext(ffmpegPath))
+}
+
+func isManualStopErr(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	code := exitErr.ExitCode()
+	return code == 130 || code == -1073741510 || code == 3221225786
 }
 
 func runSchedule(args []string) error {

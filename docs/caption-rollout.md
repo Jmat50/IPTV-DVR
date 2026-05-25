@@ -18,6 +18,31 @@
 | Live worker failure | Post-extract still runs; log notes live failure. |
 | Scheduled late start | Caption duration matches trimmed `-t`. |
 | Manual run-now | Full duration; no window skip. |
+| Manual early stop (close FFmpeg console) | Non-empty `.ts` is preserved, normalized, and treated as successful early stop (no false failure marker). |
+
+## Runtime integrity checks
+
+- `gui\tools\ccextractor\` (or frozen `tools\ccextractor\`) must contain:
+  - `ccextractor.exe`
+  - `libgpac.dll`
+  - sibling runtime DLL set from the downloaded bundle
+- Build script must not treat CCExtractor as installed when only the EXE exists.
+- Live worker invocation contract:
+  - `ccextractor --stream 15 -out=srt <recording.ts> -o <recording.srt.partial>`
+  - finalization = validate `.srt.partial` then atomic rename to `.srt`
+- Partial-stop TS normalization contract (`.ts` with bytes + non-zero FFmpeg exit):
+  - run remux with `+genpts+discardcorrupt`, `ignore_err`, `make_zero`
+  - apply video `setts` rewrite using probed `avg_frame_rate`
+  - then run caption finalization
+  - classify user-stop exits (`3221225786`, `-1073741510`, `130`) as success when output exists
+
+## Known failure signatures
+
+- `libgpac.dll was not found` -> incomplete runtime install.
+- `a value is required for '--stream <STREAM>'` -> wrong stream-mode argument shape.
+- `captions: live worker produced no valid SRT` -> worker ran but output was empty/invalid.
+- `Error reading HTTP response: End of file` with HLS parse errors -> upstream transport instability; rely on reconnect, fallback, and rerun if needed.
+- `Recording failed (ffmpeg exit code 3221225786)` with non-empty `.ts` -> user stop path should be treated as success; investigate if marker still appears.
 
 ## Regression gates
 

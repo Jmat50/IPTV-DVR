@@ -22,13 +22,15 @@ class CaptionModeTests(unittest.TestCase):
     def test_normalize(self) -> None:
         self.assertEqual(normalize_caption_mode("LIVE"), "live_ccextractor")
 
+    @patch("caption_mode.ccextractor_live_supported", return_value=True)
     @patch("caption_mode.ccextractor_available", return_value=True)
-    def test_auto_ts_live(self, _mock: object) -> None:
+    def test_auto_ts_live(self, _mock_available: object, _mock_live: object) -> None:
         self.assertEqual(resolve_caption_mode("auto", Path("x.ts")), "live_ccextractor")
         self.assertTrue(use_live_ccextractor("auto", Path("x.ts")))
 
-    @patch("caption_mode.ccextractor_available", return_value=False)
-    def test_auto_without_ccx(self, _mock: object) -> None:
+    @patch("caption_mode.ccextractor_live_supported", return_value=False)
+    @patch("caption_mode.ccextractor_available", return_value=True)
+    def test_auto_without_live_support(self, _mock_available: object, _mock_live: object) -> None:
         self.assertEqual(resolve_caption_mode("auto", Path("x.ts")), "post_only")
 
 

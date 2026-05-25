@@ -113,8 +113,14 @@ def _sidecar_has_content(path: Path) -> bool:
 
 
 def _any_caption_sidecar(output_path: Path) -> bool:
-    for ext in (".vtt", ".srt", ".ass"):
-        if _sidecar_has_content(output_path.with_suffix(ext)):
+    candidates = [
+        output_path.with_suffix(".vtt"),
+        output_path.with_suffix(".ass"),
+        output_path.with_suffix(".srt"),  # legacy naming
+        Path(str(output_path) + ".srt"),  # current Jellyfin-preferred naming
+    ]
+    for p in candidates:
+        if _sidecar_has_content(p):
             return True
     return False
 
@@ -170,6 +176,12 @@ def build_ffmpeg_argv(
         "-hide_banner",
         "-loglevel",
         "warning",
+        "-reconnect",
+        "1",
+        "-reconnect_streamed",
+        "1",
+        "-reconnect_delay_max",
+        "5",
     ]
     if user_agent:
         args += ["-user_agent", user_agent]
@@ -310,13 +322,14 @@ def build_extract_embedded_608_argv(ts_path: Path) -> tuple[list[str], Path]:
 def try_extract_embedded_608_from_ts(ts_path: Path, *, log_file: Path | None = None) -> bool:
     if ts_path.suffix.lower() != ".ts":
         return False
-    if _sidecar_has_content(ts_path.with_suffix(".srt")):
+    final_path = ts_path.with_suffix(".srt")
+    if _sidecar_has_content(final_path):
         return True
     argv, cwd = build_extract_embedded_608_argv(ts_path)
     code = run_ffmpeg(argv, log_file=log_file, cwd=cwd)
     if code != 0:
         return False
-    return _sidecar_has_content(ts_path.with_suffix(".srt"))
+    return _sidecar_has_content(final_path)
 
 
 def maybe_post_extract_captions(
@@ -379,3 +392,124 @@ def run_ffmpeg(argv: list[str], *, log_file: Path | None = None, cwd: Path | Non
     finally:
         if log_fp:
             log_fp.close()
+
+
+def is_manual_stop_exit(code: int) -> bool:
+    """Return True when ffmpeg exited due to user console close / Ctrl+C on Windows."""
+    if sys.platform != "win32":
+        return code == 130
+    # Windows STATUS_CONTROL_C_EXIT can surface as signed or unsigned.
+    return code in (130, -1073741510, 3221225786)
+
+
+def build_repair_ts_argv(ts_path: Path, repaired_path: Path) -> list[str]:
+    ff = ffmpeg_exe()
+    rate = probe_video_frame_rate(ts_path)
+    return [
+        str(ff),
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-fflags",
+        "+genpts+discardcorrupt",
+        "-err_detect",
+        "ignore_err",
+        "-avoid_negative_ts",
+        "make_zero",
+        "-i",
+        str(ts_path),
+        "-map",
+        "0",
+        "-c",
+        "copy",
+        *(
+            [
+                "-bsf:v",
+                f"setts=pts=N/({rate}*TB):dts=N/({rate}*TB)",
+            ]
+            if rate
+            else []
+        ),
+        "-y",
+        str(repaired_path),
+    ]
+
+
+def probe_video_frame_rate(media_path: Path) -> str:
+    fp = ffprobe_exe()
+    if not fp.is_file():
+        return ""
+    p = subprocess.run(
+        [
+            str(fp),
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=avg_frame_rate",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(media_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    if p.returncode != 0:
+        return ""
+    for raw in (p.stdout or "").splitlines():
+        rate = raw.strip()
+        if not rate or rate == "0/0":
+            continue
+        # Keep ffmpeg rational form (e.g. 30000/1001) for setts expression.
+        return rate
+    return ""
+
+
+def try_repair_ts_file(ts_path: Path, *, log_file: Path | None = None) -> bool:
+    """Best-effort remux to normalize partially-ended TS recordings for strict players."""
+    if ts_path.suffix.lower() != ".ts":
+        return False
+    if not ts_path.is_file():
+        return False
+    try:
+        if ts_path.stat().st_size <= 0:
+            return False
+    except OSError:
+        return False
+
+    repaired = ts_path.with_name(ts_path.name + ".repair.tmp.ts")
+    try:
+        if repaired.is_file():
+            repaired.unlink()
+    except OSError:
+        pass
+
+    code = run_ffmpeg(build_repair_ts_argv(ts_path, repaired), log_file=log_file)
+    if code != 0:
+        try:
+            if repaired.is_file():
+                repaired.unlink()
+        except OSError:
+            pass
+        return False
+
+    try:
+        if not repaired.is_file() or repaired.stat().st_size <= 0:
+            if repaired.is_file():
+                repaired.unlink()
+            return False
+    except OSError:
+        return False
+
+    try:
+        repaired.replace(ts_path)
+        return True
+    except OSError:
+        try:
+            if repaired.is_file():
+                repaired.unlink()
+        except OSError:
+            pass
+        return False

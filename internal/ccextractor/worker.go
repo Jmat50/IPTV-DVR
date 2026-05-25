@@ -14,11 +14,11 @@ import (
 func BuildArgv(ccExe, inputPath, partialOut string) []string {
 	return []string{
 		ccExe,
-		"-s",
-		"-out=srt",
-		inputPath,
+		"--stream", "15",
+		"--out=srt",
 		"-o",
 		partialOut,
+		inputPath,
 	}
 }
 
@@ -53,22 +53,10 @@ func (w *Worker) appendLog(msg string) {
 	_, _ = fmt.Fprint(w.log, msg)
 }
 
-// Start waits for the recording file then launches CCExtractor in stream mode.
+// Start launches CCExtractor in stream mode on the recording file path.
 func (w *Worker) Start() error {
 	if !fileExists(w.ccExe) {
 		return fmt.Errorf("ccextractor not found at %s", w.ccExe)
-	}
-	deadline := time.Now().Add(120 * time.Second)
-	for time.Now().Before(deadline) {
-		st, err := os.Stat(w.recordingPath)
-		if err == nil && st.Size() > 0 {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	st, err := os.Stat(w.recordingPath)
-	if err != nil || st.Size() == 0 {
-		return fmt.Errorf("timed out waiting for recording file %s", w.recordingPath)
 	}
 	_ = os.Remove(w.partialPath)
 	argv := BuildArgv(w.ccExe, w.recordingPath, w.partialPath)

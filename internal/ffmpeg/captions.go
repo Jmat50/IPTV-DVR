@@ -32,8 +32,14 @@ func SidecarHasContent(path string) bool {
 func AnyCaptionSidecar(outputPath string) bool {
 	ext := filepath.Ext(outputPath)
 	base := strings.TrimSuffix(outputPath, ext)
-	for _, sfx := range []string{".vtt", ".srt", ".ass"} {
-		if SidecarHasContent(base + sfx) {
+	candidates := []string{
+		base + ".vtt",
+		base + ".ass",
+		base + ".srt",   // legacy naming
+		outputPath + ".srt", // current naming
+	}
+	for _, p := range candidates {
+		if SidecarHasContent(p) {
 			return true
 		}
 	}

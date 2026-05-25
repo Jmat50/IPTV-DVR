@@ -43,12 +43,16 @@ function Ensure-Ffmpeg {
 }
 
 function Test-CcextractorPresent {
-    $Candidates = @(
-        (Join-Path $Root "gui\tools\ccextractor\ccextractor.exe"),
-        (Join-Path $Root "tools\ccextractor\ccextractor.exe")
+    $CandidateDirs = @(
+        (Join-Path $Root "gui\tools\ccextractor"),
+        (Join-Path $Root "tools\ccextractor")
     )
-    foreach ($p in $Candidates) {
-        if (Test-Path $p) { return $p }
+    foreach ($dir in $CandidateDirs) {
+        $exe = Join-Path $dir "ccextractor.exe"
+        $gpac = Join-Path $dir "libgpac.dll"
+        if ((Test-Path $exe) -and (Test-Path $gpac)) {
+            return $exe
+        }
     }
     return $null
 }

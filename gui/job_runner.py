@@ -16,7 +16,7 @@ from paths import log_dir
 from caption_finalize import finalize_captions, should_dual_output_vtt
 from caption_mode import migrate_caption_mode, resolve_caption_mode, use_live_ccextractor
 from caption_worker import LiveCaptionWorker
-from recorder import build_ffmpeg_argv, run_ffmpeg
+from recorder import build_ffmpeg_argv, is_manual_stop_exit, run_ffmpeg, try_repair_ts_file
 
 _JITTER_SECONDS = 8
 
@@ -226,6 +226,9 @@ def run_job(
 
     live_worker: LiveCaptionWorker | None = None
     if use_live_ccextractor(caption_mode, out):
+        # Ensure CCExtractor follows this run's file, not stale content from prior runs.
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"")
         live_worker = LiveCaptionWorker(out, log_file=log_path)
         if not live_worker.start():
             live_worker = None
@@ -236,6 +239,57 @@ def run_job(
         live_ok = live_worker.stop_and_finalize()
 
     if code != 0:
+        # Avoid leaving empty/corrupt placeholder files when ffmpeg fails before writing data.
+        out_size = 0
+        try:
+            if out.is_file():
+                out_size = out.stat().st_size
+            if out.is_file() and out_size == 0:
+                out.unlink()
+        except OSError:
+            pass
+        # If ffmpeg wrote bytes but ended non-zero (manual stop, network break, etc.),
+        # normalize the partial TS so strict players can decode it.
+        if out_size > 0:
+            _ = try_repair_ts_file(out, log_file=log_path)
+        # If ffmpeg produced a partial recording, still try caption finalize for that file.
+        if out_size > 0 and caption_mode != "off":
+            try:
+                finalize_captions(
+                    out,
+                    resolve_caption_mode(caption_mode, out),
+                    log_file=log_path,
+                    live_ok=live_ok,
+                )
+            except Exception as e:
+                print(f"captions finalize after ffmpeg error: {e}", file=sys.stderr)
+        # User-driven console close can report a non-zero exit on Windows
+        # even when ffmpeg already wrote a valid partial recording.
+        if out_size > 0 and is_manual_stop_exit(code):
+            print("ffmpeg stopped by user; keeping partial recording", file=sys.stderr)
+            return 0
+        # Write a small marker beside the expected output so failures are obvious in the target folder.
+        fail_marker = Path(str(out) + ".failed.txt")
+        tail = ""
+        try:
+            if log_path.is_file():
+                lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                tail = "\n".join(lines[-30:])
+        except OSError:
+            tail = ""
+        try:
+            fail_marker.write_text(
+                (
+                    f"Recording failed (ffmpeg exit code {code}).\n"
+                    f"Expected output: {out}\n"
+                    f"Log file: {log_path}\n\n"
+                    "Last log lines:\n"
+                    f"{tail}\n"
+                ),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
         print(f"ffmpeg exited {code}; see {log_path}", file=sys.stderr)
         return code
 
