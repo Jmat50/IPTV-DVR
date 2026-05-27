@@ -18,7 +18,7 @@
 | Live worker failure | Post-extract still runs; log notes live failure. |
 | Scheduled late start | Caption duration matches trimmed `-t`. |
 | Manual run-now | Full duration; no window skip. |
-| Manual early stop (close FFmpeg console) | Non-empty `.ts` is preserved, normalized, and treated as successful early stop (no false failure marker). |
+| Manual early stop (Ctrl+C / end FFmpeg process) | Non-empty `.ts` is preserved, normalized, and treated as successful early stop (no false failure marker). |
 
 ## Runtime integrity checks
 

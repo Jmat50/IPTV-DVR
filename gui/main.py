@@ -42,8 +42,7 @@ from caption_finalize import finalize_captions, should_dual_output_vtt
 from caption_mode import (
     migrate_caption_mode,
     normalize_caption_mode,
-    resolve_caption_mode,
-    use_live_ccextractor,
+    resolve_caption_mode_with_reason,
 )
 from caption_worker import LiveCaptionWorker
 from recorder import (
@@ -747,6 +746,7 @@ class App(tk.Tk):
             caption_mode=getattr(j, "caption_mode", None),
             download_captions=j.download_captions,
         )
+        resolved_caption_mode, caption_mode_reason = resolve_caption_mode_with_reason(caption_mode, out)
         try:
             argv = build_ffmpeg_argv(
                 stream_url=ch.url,
@@ -768,7 +768,7 @@ class App(tk.Tk):
         self.config(cursor="watch")
         self.update_idletasks()
         live_worker: LiveCaptionWorker | None = None
-        if use_live_ccextractor(caption_mode, out):
+        if resolved_caption_mode == "live_ccextractor":
             # Avoid reading stale previous sample content when filename repeats.
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_bytes(b"")
@@ -782,7 +782,7 @@ class App(tk.Tk):
         if code == 0:
             finalize_captions(
                 out,
-                resolve_caption_mode(caption_mode, out),
+                resolved_caption_mode,
                 live_ok=live_ok,
             )
         self.config(cursor="")
@@ -793,6 +793,8 @@ class App(tk.Tk):
                 if cap.is_file() and cap.stat().st_size > 0:
                     cap_note = f"\nCaptions:\n{cap}"
                     break
+            if caption_mode != "off" and resolved_caption_mode != caption_mode:
+                cap_note += f"\nLive captions disabled: {caption_mode_reason}"
             messagebox.showinfo("Test", f"Saved 15s sample to:\n{out}{cap_note}")
         else:
             messagebox.showerror("Test", f"ffmpeg failed (code {code})")

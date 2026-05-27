@@ -14,7 +14,7 @@ from duration_parse import parse_duration
 from m3u_load import find_channel, load_m3u
 from paths import log_dir
 from caption_finalize import finalize_captions, should_dual_output_vtt
-from caption_mode import migrate_caption_mode, resolve_caption_mode, use_live_ccextractor
+from caption_mode import migrate_caption_mode, resolve_caption_mode_with_reason
 from caption_worker import LiveCaptionWorker
 from recorder import build_ffmpeg_argv, is_manual_stop_exit, run_ffmpeg, try_repair_ts_file
 
@@ -205,6 +205,11 @@ def run_job(
         caption_mode=getattr(job, "caption_mode", None),
         download_captions=job.download_captions,
     )
+    resolved_caption_mode, caption_mode_reason = resolve_caption_mode_with_reason(caption_mode, out)
+    if caption_mode != "off" and resolved_caption_mode != caption_mode:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"captions: mode fallback {caption_mode} -> {resolved_caption_mode}: {caption_mode_reason}\n")
     try:
         argv = build_ffmpeg_argv(
             stream_url=ch.url,
@@ -225,7 +230,7 @@ def run_job(
         return 2
 
     live_worker: LiveCaptionWorker | None = None
-    if use_live_ccextractor(caption_mode, out):
+    if resolved_caption_mode == "live_ccextractor":
         # Ensure CCExtractor follows this run's file, not stale content from prior runs.
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(b"")
@@ -257,7 +262,7 @@ def run_job(
             try:
                 finalize_captions(
                     out,
-                    resolve_caption_mode(caption_mode, out),
+                    resolved_caption_mode,
                     log_file=log_path,
                     live_ok=live_ok,
                 )
@@ -295,7 +300,7 @@ def run_job(
 
     finalize_captions(
         out,
-        resolve_caption_mode(caption_mode, out),
+        resolved_caption_mode,
         log_file=log_path,
         live_ok=live_ok,
     )

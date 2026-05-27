@@ -10,6 +10,7 @@ from caption_mode import (
     migrate_caption_mode,
     normalize_caption_mode,
     resolve_caption_mode,
+    resolve_caption_mode_with_reason,
     use_live_ccextractor,
 )
 
@@ -32,6 +33,9 @@ class CaptionModeTests(unittest.TestCase):
     @patch("caption_mode.ccextractor_available", return_value=True)
     def test_auto_without_live_support(self, _mock_available: object, _mock_live: object) -> None:
         self.assertEqual(resolve_caption_mode("auto", Path("x.ts")), "post_only")
+        resolved, reason = resolve_caption_mode_with_reason("auto", Path("x.ts"))
+        self.assertEqual(resolved, "post_only")
+        self.assertIn("unavailable", reason)
 
 
 if __name__ == "__main__":
