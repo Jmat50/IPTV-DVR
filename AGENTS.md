@@ -40,9 +40,12 @@ Project-level guidance for AI/code agents working in this repo.
 ## Captions
 - Recordings use FFmpeg **stream copy** (`-c copy`) for video/audio. **CEA-608 / ATSC A53** in H.264 stay in the `.ts` unless a sidecar is requested.
 - **Caption modes** (`off`, `post_only`, `live_ccextractor`, `auto`): jobs store `caption_mode`; legacy `download_captions: true` migrates to `auto`. **`auto`** uses **CCExtractor** live on `.ts` when `gui/tools/ccextractor/ccextractor.exe` (or frozen `tools/ccextractor/`) exists; otherwise **post_only**.
-- **Live path (Option 2):** `gui/caption_worker.py` and `internal/ccextractor` run `ccextractor --stream 15 -out=srt` on the growing recording, write `.srt.partial`, validate, then atomically rename to `.srt`. FFmpeg recording is unchanged; only FFmpeg consoles get the Windows guard (not CCExtractor).
+- Jobs also store `caption_post_processor` (`ffmpeg` or `ccextractor`) for post-record extraction. In GUI, this selector is editable only for `auto` and `post_only`.
+- **Live path (Option 2):** `gui/caption_worker.py` and `internal/ccextractor` run `ccextractor --input ts --stream 15 --out srt -o <partial> <growing.ts>` on the growing recording, write `.srt.partial`, validate, then atomically rename to `.srt`. **CCExtractor 0.96.x** rejects that invocation (inverted `--stream` validation); `auto`/`live_ccextractor` fall back to post-only until a fixed runtime is bundled. FFmpeg recording is unchanged; only FFmpeg consoles get the Windows guard (not CCExtractor).
 - **HLS subtitle renditions:** when ffprobe sees `0:s:0?`, dual-output still writes `.vtt` during record (`-c copy`).
-- **Post-record fallback:** muxed `-map 0:s:0?` copy, then FFmpeg `movie='basename.ts'[out+subcc]` → `.srt` (cwd = recording dir) if live worker did not produce a valid sidecar.
+- **Post-record extraction:** when a sidecar is still needed, use the selected post processor:
+  - `ffmpeg`: muxed `-map 0:s:0?` copy, then `movie='basename.ts'[out+subcc]` → `.srt`
+  - `ccextractor`: file-mode `ccextractor --out=srt -o <basename.srt> <basename.ts>`
 - Install CCExtractor: `scripts/download_ccextractor.ps1` (optional; required for live mode). Runtime must include `ccextractor.exe` and sibling DLLs (notably `libgpac.dll`).
 - Build/install scripts should treat CCExtractor as present only when runtime DLLs are present; avoid skipping a partial install.
 - For `.ts` outputs that end non-zero with bytes present, run repair/remux before caption finalize:

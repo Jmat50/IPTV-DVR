@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from caption_mode import CaptionMode, captions_enabled, resolve_caption_mode
+from caption_mode import (
+    CaptionMode,
+    CaptionPostProcessor,
+    captions_enabled,
+    resolve_caption_mode,
+)
 from recorder import (
     _any_caption_sidecar,
     maybe_post_extract_captions,
@@ -28,6 +33,7 @@ def finalize_captions(
     output_path: Path,
     mode: CaptionMode,
     *,
+    post_processor: CaptionPostProcessor = "ffmpeg",
     log_file: Path | None = None,
     live_ok: bool = False,
 ) -> None:
@@ -43,5 +49,6 @@ def finalize_captions(
         maybe_post_extract_captions(
             output_path,
             download_captions=True,
+            post_processor=post_processor,
             log_file=log_file,
         )

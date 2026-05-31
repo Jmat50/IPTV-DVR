@@ -10,6 +10,11 @@ from pathlib import Path
 
 from paths import ccextractor_exe
 
+# Idle timeout (seconds) for CCExtractor tail-follow mode (--stream <secs>).
+# When the recording file stops growing for this long, CCExtractor exits.
+# See caption_mode.ccextractor_live_supported() for 0.96.x CLI compatibility checks.
+LIVE_STREAM_IDLE_SECONDS = "15"
+
 _TIMESTAMP_RE = re.compile(
     r"^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}",
     re.MULTILINE,
@@ -24,15 +29,41 @@ def srt_partial_path(output_path: Path) -> Path:
     return output_path.with_suffix(".srt.partial")
 
 
-def build_ccextractor_argv(recording_path: Path, partial_path: Path) -> list[str]:
+def build_ccextractor_live_argv(recording_path: Path, partial_path: Path) -> list[str]:
+    """Argv for tail-follow extraction on a growing MPEG-TS recording."""
     exe = ccextractor_exe()
     return [
         str(exe),
+        "-1",
+        "--input",
+        "ts",
         "--stream",
-        "15",
-        "--out=srt",
+        LIVE_STREAM_IDLE_SECONDS,
+        "--out",
+        "srt",
         "-o",
         str(partial_path),
+        str(recording_path),
+    ]
+
+
+def build_ccextractor_argv(recording_path: Path, partial_path: Path) -> list[str]:
+    return build_ccextractor_live_argv(recording_path, partial_path)
+
+
+def build_ccextractor_post_argv(recording_path: Path, out_path: Path) -> list[str]:
+    """Post-record extraction: CEA-608 only (-1).
+
+    GSN/HLS MPEG-TS often triggers a Rust panic in the default CEA-708 path
+    (service_decoder) on long files; FFmpeg subcc and CCExtractor -1 both use 608.
+    """
+    exe = ccextractor_exe()
+    return [
+        str(exe),
+        "-1",
+        "--out=srt",
+        "-o",
+        str(out_path),
         str(recording_path),
     ]
 

@@ -16,6 +16,14 @@ const (
 	ModeAuto            Mode = "auto"
 )
 
+// PostProcessor selects which tool handles post-record caption extraction.
+type PostProcessor string
+
+const (
+	PostProcessorFFmpeg      PostProcessor = "ffmpeg"
+	PostProcessorCCExtractor PostProcessor = "ccextractor"
+)
+
 // NormalizeMode maps CLI/config strings to a known mode.
 func NormalizeMode(raw string) Mode {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
@@ -61,12 +69,16 @@ func ResolveEffectiveMode(m Mode, outputPath, ccExe string) Mode {
 	switch m {
 	case ModeAuto:
 		if strings.EqualFold(filepath.Ext(outputPath), ".ts") && Available(ccExe) {
-			return ModeLiveCCExtractor
+			if ok, _ := LiveSupported(ccExe); ok {
+				return ModeLiveCCExtractor
+			}
 		}
 		return ModePostOnly
 	case ModeLiveCCExtractor:
 		if strings.EqualFold(filepath.Ext(outputPath), ".ts") && Available(ccExe) {
-			return ModeLiveCCExtractor
+			if ok, _ := LiveSupported(ccExe); ok {
+				return ModeLiveCCExtractor
+			}
 		}
 		return ModePostOnly
 	default:
@@ -77,6 +89,29 @@ func ResolveEffectiveMode(m Mode, outputPath, ccExe string) Mode {
 // UseLiveCCExtractor reports whether the live sidecar worker should run.
 func UseLiveCCExtractor(m Mode, outputPath, ccExe string) bool {
 	return ResolveEffectiveMode(m, outputPath, ccExe) == ModeLiveCCExtractor
+}
+
+// NormalizePostProcessor maps CLI/config strings to a known post processor.
+func NormalizePostProcessor(raw string) PostProcessor {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "ccextractor", "cc":
+		return PostProcessorCCExtractor
+	default:
+		return PostProcessorFFmpeg
+	}
+}
+
+// ModeAllowsPostProcessor reports whether the UI/CLI selector should apply for a mode.
+func ModeAllowsPostProcessor(m Mode) bool {
+	return m == ModeAuto || m == ModePostOnly
+}
+
+// ResolvePostProcessorForMode applies selector gating based on caption mode.
+func ResolvePostProcessorForMode(m Mode, requested string) PostProcessor {
+	if !ModeAllowsPostProcessor(m) {
+		return PostProcessorFFmpeg
+	}
+	return NormalizePostProcessor(requested)
 }
 
 func execLookPath(name string) (string, error) {

@@ -6,7 +6,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from caption_worker import atomic_finalize_partial, build_ccextractor_argv, validate_srt_file
+from caption_worker import (
+    atomic_finalize_partial,
+    build_ccextractor_argv,
+    build_ccextractor_post_argv,
+    validate_srt_file,
+)
 
 
 class CaptionWorkerTests(unittest.TestCase):
@@ -14,9 +19,22 @@ class CaptionWorkerTests(unittest.TestCase):
         recording = Path(r"C:\tmp\show.ts")
         partial = Path(r"C:\tmp\show.srt.partial")
         argv = build_ccextractor_argv(recording, partial)
+        self.assertIn("-1", argv)
+        self.assertIn("--input", argv)
+        self.assertIn("ts", argv)
         self.assertIn("--stream", argv)
         self.assertIn("15", argv)
+        self.assertIn("--out", argv)
+        self.assertIn("srt", argv)
+        self.assertEqual(argv[-1], str(recording))
+
+    def test_build_post_argv(self) -> None:
+        recording = Path(r"C:\tmp\show.ts")
+        final = Path(r"C:\tmp\show.srt")
+        argv = build_ccextractor_post_argv(recording, final)
+        self.assertIn("-1", argv)
         self.assertIn("--out=srt", argv)
+        self.assertEqual(argv[-2], str(final))
         self.assertEqual(argv[-1], str(recording))
 
     def test_validate_and_finalize(self) -> None:

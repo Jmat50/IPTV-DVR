@@ -14,7 +14,11 @@ from duration_parse import parse_duration
 from m3u_load import find_channel, load_m3u
 from paths import log_dir
 from caption_finalize import finalize_captions, should_dual_output_vtt
-from caption_mode import migrate_caption_mode, resolve_caption_mode_with_reason
+from caption_mode import (
+    migrate_caption_mode,
+    resolve_caption_mode_with_reason,
+    resolve_post_processor_for_mode,
+)
 from caption_worker import LiveCaptionWorker
 from recorder import build_ffmpeg_argv, is_manual_stop_exit, run_ffmpeg, try_repair_ts_file
 
@@ -205,11 +209,19 @@ def run_job(
         caption_mode=getattr(job, "caption_mode", None),
         download_captions=job.download_captions,
     )
+    post_processor = resolve_post_processor_for_mode(
+        caption_mode,
+        getattr(job, "caption_post_processor", "ffmpeg"),
+    )
     resolved_caption_mode, caption_mode_reason = resolve_caption_mode_with_reason(caption_mode, out)
     if caption_mode != "off" and resolved_caption_mode != caption_mode:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"captions: mode fallback {caption_mode} -> {resolved_caption_mode}: {caption_mode_reason}\n")
+    if caption_mode != "off":
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"captions: post processor: {post_processor}\n")
     try:
         argv = build_ffmpeg_argv(
             stream_url=ch.url,
@@ -255,14 +267,18 @@ def run_job(
             pass
         # If ffmpeg wrote bytes but ended non-zero (manual stop, network break, etc.),
         # normalize the partial TS so strict players can decode it.
+        repaired = False
         if out_size > 0:
-            _ = try_repair_ts_file(out, log_file=log_path)
+            repaired = try_repair_ts_file(out, log_file=log_path)
+            if not repaired:
+                print("captions: partial TS repair was attempted but not applied", file=sys.stderr)
         # If ffmpeg produced a partial recording, still try caption finalize for that file.
         if out_size > 0 and caption_mode != "off":
             try:
                 finalize_captions(
                     out,
                     resolved_caption_mode,
+                    post_processor=post_processor,
                     log_file=log_path,
                     live_ok=live_ok,
                 )
@@ -301,6 +317,7 @@ def run_job(
     finalize_captions(
         out,
         resolved_caption_mode,
+        post_processor=post_processor,
         log_file=log_path,
         live_ok=live_ok,
     )

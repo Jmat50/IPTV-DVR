@@ -7,10 +7,13 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
+from caption_worker import build_ccextractor_live_argv
 from paths import ccextractor_exe
 
 CaptionMode = Literal["off", "post_only", "live_ccextractor", "auto"]
+CaptionPostProcessor = Literal["ffmpeg", "ccextractor"]
 CAPTION_MODES: tuple[CaptionMode, ...] = ("off", "post_only", "live_ccextractor", "auto")
+CAPTION_POST_PROCESSORS: tuple[CaptionPostProcessor, ...] = ("ffmpeg", "ccextractor")
 
 _MODE_ALIASES: dict[str, CaptionMode] = {
     "": "off",
@@ -23,6 +26,12 @@ _MODE_ALIASES: dict[str, CaptionMode] = {
     "ccextractor": "live_ccextractor",
     "auto": "auto",
 }
+_POST_PROCESSOR_ALIASES: dict[str, CaptionPostProcessor] = {
+    "": "ffmpeg",
+    "ffmpeg": "ffmpeg",
+    "cc": "ccextractor",
+    "ccextractor": "ccextractor",
+}
 
 _LIVE_SUPPORT_CACHE: bool | None = None
 _LIVE_SUPPORT_REASON: str = ""
@@ -31,6 +40,24 @@ _LIVE_SUPPORT_REASON: str = ""
 def normalize_caption_mode(raw: str | None) -> CaptionMode:
     key = (raw or "").strip().lower()
     return _MODE_ALIASES.get(key, "off")
+
+
+def normalize_caption_post_processor(raw: str | None) -> CaptionPostProcessor:
+    key = (raw or "").strip().lower()
+    return _POST_PROCESSOR_ALIASES.get(key, "ffmpeg")
+
+
+def caption_mode_allows_post_processor(mode: CaptionMode) -> bool:
+    return mode in ("auto", "post_only")
+
+
+def resolve_post_processor_for_mode(
+    mode: CaptionMode,
+    requested: str | None,
+) -> CaptionPostProcessor:
+    if not caption_mode_allows_post_processor(mode):
+        return "ffmpeg"
+    return normalize_caption_post_processor(requested)
 
 
 def ccextractor_available() -> bool:
@@ -50,6 +77,11 @@ def ccextractor_live_support_reason() -> str:
     return _LIVE_SUPPORT_REASON
 
 
+def _probe_ts_bytes() -> bytes:
+    """Minimal bytes so the probe file exists; CCExtractor validates CLI before read."""
+    return b"\x47"  # MPEG-TS sync byte
+
+
 def ccextractor_live_supported() -> bool:
     if _LIVE_SUPPORT_CACHE is not None:
         return _LIVE_SUPPORT_CACHE
@@ -58,23 +90,16 @@ def ccextractor_live_supported() -> bool:
         return _set_live_support_cache(False, f"CCExtractor not found at {exe}")
     with tempfile.TemporaryDirectory() as td:
         probe = Path(td) / "probe.ts"
-        probe.write_bytes(b"\x00")
+        probe.write_bytes(_probe_ts_bytes())
         partial = Path(td) / "probe.srt.partial"
-        cmd = [
-            str(exe),
-            "--stream",
-            "15",
-            "--out=srt",
-            "-o",
-            str(partial),
-            str(probe),
-        ]
+        cmd = build_ccextractor_live_argv(probe, partial)
         try:
             p = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=3,
+                timeout=5,
+                cwd=str(exe.parent),
             )
             out = f"{p.stdout}\n{p.stderr}".lower()
         except subprocess.TimeoutExpired:
@@ -85,7 +110,8 @@ def ccextractor_live_supported() -> bool:
         if "only supports one input file" in out:
             return _set_live_support_cache(
                 False,
-                "live stream mode rejected the runtime invocation (only one input file allowed)",
+                "CCExtractor 0.96.x CLI regression: --stream <secs> rejects any input file "
+                "(inverted validation in rust parser; live tail mode never starts)",
             )
         if "a value is required for '--stream <stream>'" in out:
             return _set_live_support_cache(False, "live stream mode parsing failed (--stream value)")

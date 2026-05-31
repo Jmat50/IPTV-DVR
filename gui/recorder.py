@@ -8,8 +8,10 @@ import threading
 import time
 from pathlib import Path
 
+from caption_mode import CaptionPostProcessor
+from caption_worker import build_ccextractor_post_argv, validate_srt_file
 from duration_parse import parse_duration
-from paths import ffmpeg_exe, ffprobe_exe
+from paths import ccextractor_exe, ffmpeg_exe, ffprobe_exe
 
 if sys.platform == "win32":
     import ctypes
@@ -332,10 +334,71 @@ def try_extract_embedded_608_from_ts(ts_path: Path, *, log_file: Path | None = N
     return _sidecar_has_content(final_path)
 
 
+def run_tool(
+    argv: list[str],
+    *,
+    log_file: Path | None = None,
+    cwd: Path | None = None,
+) -> int:
+    log_fp = None
+    try:
+        if log_file:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            log_fp = open(log_file, "a", encoding="utf-8")
+            log_fp.write(f"\n---\n$ {' '.join(argv)}\n")
+            log_fp.flush()
+        p = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            cwd=str(cwd) if cwd is not None else None,
+            check=False,
+        )
+        body = f"{p.stdout or ''}{p.stderr or ''}"
+        if log_fp and body:
+            log_fp.write(body)
+            log_fp.flush()
+        return int(p.returncode)
+    finally:
+        if log_fp:
+            log_fp.close()
+
+
+def try_extract_ccextractor_post(ts_path: Path, *, log_file: Path | None = None) -> bool:
+    if ts_path.suffix.lower() != ".ts":
+        return False
+    exe = ccextractor_exe()
+    if not exe.is_file():
+        msg = f"captions: post ccextractor unavailable at {exe}\n"
+        if log_file:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(msg)
+        else:
+            print(msg, end="", file=sys.stderr)
+        return False
+    final_path = ts_path.with_suffix(".srt")
+    if _sidecar_has_content(final_path):
+        return True
+    code = run_tool(
+        build_ccextractor_post_argv(ts_path, final_path),
+        log_file=log_file,
+    )
+    if code != 0:
+        try:
+            if final_path.is_file():
+                final_path.unlink()
+        except OSError:
+            pass
+        return False
+    return validate_srt_file(final_path)
+
+
 def maybe_post_extract_captions(
     output_path: Path,
     *,
     download_captions: bool,
+    post_processor: CaptionPostProcessor = "ffmpeg",
     log_file: Path | None = None,
 ) -> None:
     if not download_captions:
@@ -346,10 +409,14 @@ def maybe_post_extract_captions(
         return
     if not output_path.is_file():
         return
-    if try_extract_captions_from_ts(output_path, log_file=log_file):
-        return
-    if try_extract_embedded_608_from_ts(output_path, log_file=log_file):
-        return
+    if post_processor == "ccextractor":
+        if try_extract_ccextractor_post(output_path, log_file=log_file):
+            return
+    else:
+        if try_extract_captions_from_ts(output_path, log_file=log_file):
+            return
+        if try_extract_embedded_608_from_ts(output_path, log_file=log_file):
+            return
     msg = "captions: none found in stream or recording\n"
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -402,7 +469,7 @@ def is_manual_stop_exit(code: int) -> bool:
     return code in (130, -1073741510, 3221225786)
 
 
-def build_repair_ts_argv(ts_path: Path, repaired_path: Path) -> list[str]:
+def build_repair_ts_argv(ts_path: Path, repaired_path: Path, *, use_setts: bool) -> list[str]:
     ff = ffmpeg_exe()
     rate = probe_video_frame_rate(ts_path)
     return [
@@ -427,7 +494,7 @@ def build_repair_ts_argv(ts_path: Path, repaired_path: Path) -> list[str]:
                 "-bsf:v",
                 f"setts=pts=N/({rate}*TB):dts=N/({rate}*TB)",
             ]
-            if rate
+            if use_setts and rate
             else []
         ),
         "-y",
@@ -486,30 +553,68 @@ def try_repair_ts_file(ts_path: Path, *, log_file: Path | None = None) -> bool:
     except OSError:
         pass
 
-    code = run_ffmpeg(build_repair_ts_argv(ts_path, repaired), log_file=log_file)
-    if code != 0:
+    # Some streams regress with forced setts while others need it.
+    # Try setts first, then a pure remux fallback if validation fails.
+    for use_setts in (True, False):
+        code = run_ffmpeg(build_repair_ts_argv(ts_path, repaired, use_setts=use_setts), log_file=log_file)
+        if code != 0:
+            try:
+                if repaired.is_file():
+                    repaired.unlink()
+            except OSError:
+                pass
+            continue
         try:
-            if repaired.is_file():
-                repaired.unlink()
+            if not repaired.is_file() or repaired.stat().st_size <= 0:
+                if repaired.is_file():
+                    repaired.unlink()
+                continue
         except OSError:
-            pass
-        return False
-
-    try:
-        if not repaired.is_file() or repaired.stat().st_size <= 0:
-            if repaired.is_file():
-                repaired.unlink()
-            return False
-    except OSError:
-        return False
-
-    try:
-        repaired.replace(ts_path)
-        return True
-    except OSError:
+            continue
         try:
-            if repaired.is_file():
-                repaired.unlink()
+            repaired.replace(ts_path)
         except OSError:
-            pass
-        return False
+            try:
+                if repaired.is_file():
+                    repaired.unlink()
+            except OSError:
+                pass
+            continue
+        if _validate_repaired_ts(ts_path, log_file=log_file):
+            return True
+        if log_file:
+            with open(log_file, "a", encoding="utf-8") as f:
+                mode = "setts" if use_setts else "plain-remux"
+                f.write(f"captions: TS repair validation failed after {mode}, trying fallback\n")
+    return False
+
+
+def _validate_repaired_ts(ts_path: Path, *, log_file: Path | None = None) -> bool:
+    ff = ffmpeg_exe()
+    cmd = [
+        str(ff),
+        "-hide_banner",
+        "-v",
+        "warning",
+        "-i",
+        str(ts_path),
+        "-map",
+        "0",
+        "-t",
+        "20",
+        "-f",
+        "null",
+        "-",
+    ]
+    p = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    out = f"{p.stdout or ''}{p.stderr or ''}".lower()
+    bad = (
+        "non-monoton" in out
+        or "invalid dts" in out
+        or "error while decoding" in out
+        or "packet corrupt" in out
+    )
+    if log_file and out.strip():
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(out)
+    return p.returncode == 0 and not bad

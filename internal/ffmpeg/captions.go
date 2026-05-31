@@ -2,11 +2,13 @@ package ffmpeg
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"iptv-dvr/internal/ccextractor"
 	"iptv-dvr/internal/winffmpeg"
 )
 
@@ -35,7 +37,7 @@ func AnyCaptionSidecar(outputPath string) bool {
 	candidates := []string{
 		base + ".vtt",
 		base + ".ass",
-		base + ".srt",   // legacy naming
+		base + ".srt",       // legacy naming
 		outputPath + ".srt", // current naming
 	}
 	for _, p := range candidates {
@@ -210,13 +212,23 @@ func TryExtractEmbedded608FromTS(ffmpegPath, tsPath string) (bool, error) {
 	return SidecarHasContent(Embedded608SidecarPath(tsPath)), nil
 }
 
-// PostExtractCaptions runs after a successful .ts record when --captions is enabled.
-func PostExtractCaptions(ffmpegPath, ffprobePath, outputPath string) (bool, error) {
+// PostExtractCaptions runs after a successful .ts record when captions are enabled.
+func PostExtractCaptions(
+	ffmpegPath,
+	ffprobePath,
+	outputPath string,
+	postProcessor ccextractor.PostProcessor,
+	ccExe string,
+	log io.Writer,
+) (bool, error) {
 	if AnyCaptionSidecar(outputPath) {
 		return true, nil
 	}
 	if !strings.EqualFold(filepath.Ext(outputPath), ".ts") {
 		return false, nil
+	}
+	if postProcessor == ccextractor.PostProcessorCCExtractor {
+		return ccextractor.TryExtractPostFromTS(outputPath, ccExe, log)
 	}
 	ok, err := TryExtractCaptionsFromTS(ffmpegPath, ffprobePath, outputPath)
 	if err != nil {

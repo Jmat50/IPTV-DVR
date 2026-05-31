@@ -20,3 +20,12 @@ func TestResolveEffectiveModeNonTS(t *testing.T) {
 		t.Fatalf("mp4 live -> post_only, got %q", got)
 	}
 }
+
+func TestResolvePostProcessorForMode(t *testing.T) {
+	if got := ResolvePostProcessorForMode(ModeAuto, "ccextractor"); got != PostProcessorCCExtractor {
+		t.Fatalf("auto should allow ccextractor, got %q", got)
+	}
+	if got := ResolvePostProcessorForMode(ModeOff, "ccextractor"); got != PostProcessorFFmpeg {
+		t.Fatalf("off should force ffmpeg, got %q", got)
+	}
+}

@@ -40,15 +40,20 @@ from paths import (
 )
 from caption_finalize import finalize_captions, should_dual_output_vtt
 from caption_mode import (
+    caption_mode_allows_post_processor,
     migrate_caption_mode,
     normalize_caption_mode,
+    normalize_caption_post_processor,
+    resolve_post_processor_for_mode,
     resolve_caption_mode_with_reason,
 )
 from caption_worker import LiveCaptionWorker
 from recorder import (
     build_ffmpeg_argv,
     caption_sidecar_path,
+    is_manual_stop_exit,
     run_ffmpeg,
+    try_repair_ts_file,
 )
 from scheduler_win import (
     disable_wake_timers,
@@ -746,6 +751,10 @@ class App(tk.Tk):
             caption_mode=getattr(j, "caption_mode", None),
             download_captions=j.download_captions,
         )
+        post_processor = resolve_post_processor_for_mode(
+            caption_mode,
+            getattr(j, "caption_post_processor", "ffmpeg"),
+        )
         resolved_caption_mode, caption_mode_reason = resolve_caption_mode_with_reason(caption_mode, out)
         try:
             argv = build_ffmpeg_argv(
@@ -776,17 +785,28 @@ class App(tk.Tk):
             if not live_worker.start():
                 live_worker = None
         code = run_ffmpeg(argv, log_file=None)
+        out_size = 0
+        try:
+            if out.is_file():
+                out_size = out.stat().st_size
+        except OSError:
+            out_size = 0
+        repaired = False
+        if code != 0 and out_size > 0:
+            repaired = try_repair_ts_file(out, log_file=None)
+        treat_as_success = code == 0 or (out_size > 0 and is_manual_stop_exit(code))
         live_ok = False
         if live_worker is not None:
             live_ok = live_worker.stop_and_finalize()
-        if code == 0:
+        if treat_as_success:
             finalize_captions(
                 out,
                 resolved_caption_mode,
+                post_processor=post_processor,
                 live_ok=live_ok,
             )
         self.config(cursor="")
-        if code == 0:
+        if treat_as_success:
             cap_note = ""
             for ext in (".vtt", ".srt", ".ass"):
                 cap = out.with_suffix(ext)
@@ -795,6 +815,14 @@ class App(tk.Tk):
                     break
             if caption_mode != "off" and resolved_caption_mode != caption_mode:
                 cap_note += f"\nLive captions disabled: {caption_mode_reason}"
+            if caption_mode != "off":
+                cap_note += f"\nPost processor: {post_processor}"
+            if code != 0:
+                cap_note += f"\nFFmpeg exited {code}; kept partial recording"
+                if repaired:
+                    cap_note += "\nPartial TS repair: applied"
+                elif out_size > 0:
+                    cap_note += "\nPartial TS repair: attempted but not applied"
             messagebox.showinfo("Test", f"Saved 15s sample to:\n{out}{cap_note}")
         else:
             messagebox.showerror("Test", f"ffmpeg failed (code {code})")
@@ -909,21 +937,37 @@ class JobEditor(tk.Toplevel):
                 or ("auto" if job.download_captions else "off"),
             )
         self.caption_mode_v = tk.StringVar(value=cap_default)
+        post_default = normalize_caption_post_processor(
+            getattr(job, "caption_post_processor", "ffmpeg") if job else "ffmpeg"
+        )
+        self.caption_post_v = tk.StringVar(value=post_default)
         cap_fr = ttk.Frame(f)
         cap_fr.grid(row=9, column=1, sticky=tk.W, pady=2)
         ttk.Label(cap_fr, text="Captions").pack(side=tk.LEFT)
-        ttk.Combobox(
+        self.caption_mode_combo = ttk.Combobox(
             cap_fr,
             textvariable=self.caption_mode_v,
             values=["off", "auto", "post_only", "live_ccextractor"],
             width=18,
             state="readonly",
-        ).pack(side=tk.LEFT, padx=6)
+        )
+        self.caption_mode_combo.pack(side=tk.LEFT, padx=6)
+        ttk.Label(cap_fr, text="Post").pack(side=tk.LEFT)
+        self.caption_post_combo = ttk.Combobox(
+            cap_fr,
+            textvariable=self.caption_post_v,
+            values=["ffmpeg", "ccextractor"],
+            width=12,
+            state="readonly",
+        )
+        self.caption_post_combo.pack(side=tk.LEFT, padx=6)
         ttk.Label(
             cap_fr,
             text="auto = live .srt when CCExtractor installed",
             font=("TkDefaultFont", 8),
         ).pack(side=tk.LEFT)
+        self.caption_mode_v.trace_add("write", lambda *_: self._sync_post_processor_state())
+        self._sync_post_processor_state()
 
         fmt_fr = ttk.Frame(f)
         fmt_fr.grid(row=10, column=1, sticky=tk.W, pady=2)
@@ -988,6 +1032,13 @@ class JobEditor(tk.Toplevel):
         if picker.selected_name:
             self.ch_v.set(picker.selected_name)
 
+    def _sync_post_processor_state(self) -> None:
+        mode = normalize_caption_mode(self.caption_mode_v.get())
+        if caption_mode_allows_post_processor(mode):
+            self.caption_post_combo.configure(state="readonly")
+        else:
+            self.caption_post_combo.configure(state="disabled")
+
     def save(self) -> None:
         name = self.name_v.get().strip()
         if not name:
@@ -1041,6 +1092,10 @@ class JobEditor(tk.Toplevel):
         j.enabled = self.en_v.get()
         cap_mode = normalize_caption_mode(self.caption_mode_v.get())
         j.caption_mode = cap_mode
+        j.caption_post_processor = resolve_post_processor_for_mode(
+            cap_mode,
+            self.caption_post_v.get(),
+        )
         j.download_captions = cap_mode != "off"
         j.schedule.mode = "daily" if mode == "daily" else "weekly"
         j.schedule.days = [] if mode == "daily" else days

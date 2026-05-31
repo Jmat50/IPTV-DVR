@@ -197,8 +197,8 @@ Recording uses **stream copy** (`-c copy`) for video and audio. Caption behavior
 | Mode | Behavior |
 |------|----------|
 | `off` | No sidecar work. |
-| `post_only` | After record: muxed subtitle copy, then FFmpeg embedded-608 extract to `.srt` (`.ts` only). |
-| `live_ccextractor` | During record: CCExtractor stream mode (`--stream 15 -out=srt`) writes `.srt.partial` → validated `.srt` on finish; post-extract fallback if live output is empty. |
+| `post_only` | After record: run the selected post processor (`ffmpeg` or `ccextractor`) to produce `.srt` (`.ts` only). |
+| `live_ccextractor` | During record: CCExtractor stream mode (`--stream 15 -out=srt`) writes `.srt.partial` → validated `.srt` on finish. |
 | `auto` | `live_ccextractor` when CCExtractor is installed and output is `.ts`; otherwise `post_only`. |
 
 | Delivery | What you get in `.ts` | Sidecar |
@@ -206,7 +206,11 @@ Recording uses **stream copy** (`-c copy`) for video and audio. Caption behavior
 | **Embedded in video** (CEA-608 / ATSC A53) | CC stays in H.264 (VLC can show CC). | Live `.srt` while recording (CCExtractor) or post-extract `.srt` (FFmpeg). |
 | **HLS subtitles** (WebVTT renditions) | Video+audio copy. | Live `.vtt` when ffprobe sees a subtitle stream; post muxed copy otherwise. |
 
-**Practical takeaway:** Set job **Captions** to **auto**, run `download_ccextractor.ps1` once, and use `.ts` output for broadcast IPTV — you get a Jellyfin-ready `.srt` beside each recording without a manual FFmpeg step.
+**Post processor selector:** In Job Editor, choose **Post** = `ffmpeg` or `ccextractor`. This dropdown is editable only when **Captions** mode is `auto` or `post_only`.
+
+**CLI equivalent:** `--caption-post-processor ffmpeg|ccextractor` (applies to post-record extraction in `auto` / `post_only`).
+
+**Practical takeaway:** Set job **Captions** to **auto**, select your preferred **Post** processor, and use `.ts` output for broadcast IPTV to keep automated `.srt` sidecar generation.
 
 ## Caption troubleshooting
 
@@ -223,7 +227,7 @@ If you can see embedded CC in playback but no `.srt` sidecar appears:
    - `Error reading HTTP response: End of file` / HLS parse errors  
      (provider/network instability; FFmpeg reconnect logic retries but long failures can still abort)
 3. Confirm output format is `.ts` for live embedded-caption extraction.
-4. If needed, switch mode to `post_only` to force FFmpeg fallback sidecar generation after recording.
+4. If needed, switch mode to `post_only`, then set **Post** to either `ffmpeg` or `ccextractor` to force that post extractor after recording.
 
 If a run was stopped manually and you see a `.failed.txt` marker:
 

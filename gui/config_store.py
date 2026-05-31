@@ -8,13 +8,18 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from caption_mode import migrate_caption_mode, normalize_caption_mode
+from caption_mode import (
+    migrate_caption_mode,
+    normalize_caption_mode,
+    normalize_caption_post_processor,
+)
 from paths import config_file
 
 
 ScheduleMode = Literal["daily", "weekly"]
 OutputFormat = Literal["ts", "mp4", "mkv", "mov"]
 CaptionMode = Literal["off", "post_only", "live_ccextractor", "auto"]
+CaptionPostProcessor = Literal["ffmpeg", "ccextractor"]
 @dataclass
 class Source:
     id: str
@@ -49,6 +54,7 @@ class Job:
     enabled: bool = True
     download_captions: bool = False  # legacy; mirrored when caption_mode != off
     caption_mode: CaptionMode = "off"
+    caption_post_processor: CaptionPostProcessor = "ffmpeg"
     schedule: Schedule = field(default_factory=Schedule)
 
     @staticmethod
@@ -112,6 +118,7 @@ def _job_from_dict(d: dict[str, Any]) -> Job:
         enabled=bool(d.get("enabled", True)),
         download_captions=caption_mode != "off",
         caption_mode=caption_mode,
+        caption_post_processor=normalize_caption_post_processor(d.get("caption_post_processor")),
         schedule=_schedule_from_dict(sch) if isinstance(sch, dict) else Schedule(),
     )
 
@@ -135,6 +142,9 @@ def _job_to_dict(job: Job) -> dict[str, Any]:
     mode = normalize_caption_mode(job.caption_mode)
     d["caption_mode"] = mode
     d["download_captions"] = mode != "off"
+    d["caption_post_processor"] = normalize_caption_post_processor(
+        getattr(job, "caption_post_processor", "ffmpeg")
+    )
     return d
 
 

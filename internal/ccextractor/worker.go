@@ -14,8 +14,10 @@ import (
 func BuildArgv(ccExe, inputPath, partialOut string) []string {
 	return []string{
 		ccExe,
+		"-1",
+		"--input", "ts",
 		"--stream", "15",
-		"--out=srt",
+		"--out", "srt",
 		"-o",
 		partialOut,
 		inputPath,
