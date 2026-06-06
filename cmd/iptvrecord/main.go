@@ -276,7 +276,7 @@ func runRecord(args []string) error {
 		// If ffmpeg wrote bytes but exited non-zero (manual close / stream break),
 		// normalize the partial TS so strict players can still open it.
 		if outSize > 0 {
-			if !ffmpeg.TryRepairTSFile(ff, o.out, os.Stderr) {
+			if !ffmpeg.TryRepairTSFile(ff, o.out, os.Stderr, true) {
 				fmt.Fprintln(os.Stderr, "captions: partial TS repair was attempted but not applied")
 			}
 		}

@@ -114,14 +114,17 @@ def _sidecar_has_content(path: Path) -> bool:
         return False
 
 
-def _any_caption_sidecar(output_path: Path) -> bool:
-    candidates = [
+def _caption_sidecar_paths(output_path: Path) -> list[Path]:
+    return [
         output_path.with_suffix(".vtt"),
         output_path.with_suffix(".ass"),
-        output_path.with_suffix(".srt"),  # legacy naming
-        Path(str(output_path) + ".srt"),  # current Jellyfin-preferred naming
+        output_path.with_suffix(".srt"),
+        Path(str(output_path) + ".srt"),
     ]
-    for p in candidates:
+
+
+def _any_caption_sidecar(output_path: Path) -> bool:
+    for p in _caption_sidecar_paths(output_path):
         if _sidecar_has_content(p):
             return True
     return False
@@ -534,8 +537,57 @@ def probe_video_frame_rate(media_path: Path) -> str:
     return ""
 
 
-def try_repair_ts_file(ts_path: Path, *, log_file: Path | None = None) -> bool:
-    """Best-effort remux to normalize partially-ended TS recordings for strict players."""
+# Skip TS repair when A/V durations already diverge (e.g. after a setts remux).
+_MAX_REPAIR_AV_DELTA_S = 5.0
+
+
+def probe_stream_duration(media_path: Path, stream: str) -> float | None:
+    """Return stream duration in seconds, or None when unavailable."""
+    fp = ffprobe_exe()
+    if not fp.is_file():
+        return None
+    p = subprocess.run(
+        [
+            str(fp),
+            "-v",
+            "error",
+            "-select_streams",
+            stream,
+            "-show_entries",
+            "stream=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(media_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if p.returncode != 0:
+        return None
+    for raw in (p.stdout or "").splitlines():
+        text = raw.strip()
+        if not text:
+            continue
+        try:
+            return float(text)
+        except ValueError:
+            continue
+    return None
+
+
+def probe_av_duration_delta(media_path: Path) -> float | None:
+    """Return video duration minus audio duration in seconds."""
+    video = probe_stream_duration(media_path, "v:0")
+    audio = probe_stream_duration(media_path, "a:0")
+    if video is None or audio is None:
+        return None
+    return video - audio
+
+
+def should_repair_ts_file(ts_path: Path, *, partial_recording: bool = False) -> bool:
+    """Return True only for partial/corrupt TS that may benefit from remux repair."""
     if ts_path.suffix.lower() != ".ts":
         return False
     if not ts_path.is_file():
@@ -544,6 +596,29 @@ def try_repair_ts_file(ts_path: Path, *, log_file: Path | None = None) -> bool:
         if ts_path.stat().st_size <= 0:
             return False
     except OSError:
+        return False
+
+    delta = probe_av_duration_delta(ts_path)
+    if delta is not None and abs(delta) > _MAX_REPAIR_AV_DELTA_S:
+        return False
+
+    if not partial_recording and _validate_repaired_ts(ts_path):
+        return False
+
+    return True
+
+
+def try_repair_ts_file(
+    ts_path: Path,
+    *,
+    log_file: Path | None = None,
+    partial_recording: bool = False,
+) -> bool:
+    """Best-effort remux to normalize partially-ended TS recordings for strict players."""
+    if not should_repair_ts_file(ts_path, partial_recording=partial_recording):
+        if log_file:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write("captions: TS repair skipped (complete or already skewed recording)\n")
         return False
 
     repaired = ts_path.with_name(ts_path.name + ".repair.tmp.ts")
@@ -618,3 +693,152 @@ def _validate_repaired_ts(ts_path: Path, *, log_file: Path | None = None) -> boo
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(out)
     return p.returncode == 0 and not bad
+
+
+def probe_audio_bitrate(media_path: Path) -> int | None:
+    fp = ffprobe_exe()
+    if not fp.is_file():
+        return None
+    p = subprocess.run(
+        [
+            str(fp),
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=bit_rate",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(media_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if p.returncode != 0:
+        return None
+    for raw in (p.stdout or "").splitlines():
+        text = raw.strip()
+        if not text:
+            continue
+        try:
+            return int(text)
+        except ValueError:
+            continue
+    return None
+
+
+def build_resync_audio_to_video_argv(
+    ts_path: Path,
+    out_path: Path,
+    *,
+    atempo: float,
+    audio_bitrate: int | None = None,
+) -> list[str]:
+    """Stretch or compress audio to match the video timeline; video is stream-copied."""
+    ff = ffmpeg_exe()
+    br = audio_bitrate or probe_audio_bitrate(ts_path) or 192_000
+    br_k = max(64, int(round(br / 1000)))
+    return [
+        str(ff),
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-i",
+        str(ts_path),
+        "-map",
+        "0:v:0",
+        "-c:v",
+        "copy",
+        "-map",
+        "0:a:0",
+        "-filter:a",
+        f"atempo={atempo:.6f}",
+        "-c:a",
+        "aac",
+        "-b:a",
+        f"{br_k}k",
+        "-y",
+        str(out_path),
+    ]
+
+
+def try_resync_audio_to_video(ts_path: Path, *, log_file: Path | None = None) -> bool:
+    """Re-time audio to the video clock when A/V durations diverge (e.g. after setts repair)."""
+    if ts_path.suffix.lower() != ".ts":
+        return False
+    if not ts_path.is_file():
+        return False
+
+    video = probe_stream_duration(ts_path, "v:0")
+    audio = probe_stream_duration(ts_path, "a:0")
+    if video is None or audio is None or video <= 0 or audio <= 0:
+        return False
+
+    delta = video - audio
+    if abs(delta) < 0.5:
+        return False
+
+    # Slow audio when video is longer; speed up when audio is longer.
+    atempo = audio / video
+    if not 0.5 <= atempo <= 2.0:
+        if log_file:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(
+                    f"captions: audio resync skipped (atempo {atempo:.4f} outside 0.5..2.0)\n"
+                )
+        return False
+
+    resynced = ts_path.with_name(ts_path.name + ".resync.tmp.ts")
+    try:
+        if resynced.is_file():
+            resynced.unlink()
+    except OSError:
+        pass
+
+    argv = build_resync_audio_to_video_argv(ts_path, resynced, atempo=atempo)
+    code = run_ffmpeg(argv, log_file=log_file)
+    if code != 0:
+        try:
+            if resynced.is_file():
+                resynced.unlink()
+        except OSError:
+            pass
+        return False
+
+    try:
+        if not resynced.is_file() or resynced.stat().st_size <= 0:
+            return False
+    except OSError:
+        return False
+
+    new_delta = probe_av_duration_delta(resynced)
+    if new_delta is None or abs(new_delta) > 2.0:
+        try:
+            resynced.unlink()
+        except OSError:
+            pass
+        if log_file:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"captions: audio resync rejected (remaining delta {new_delta})\n")
+        return False
+
+    try:
+        resynced.replace(ts_path)
+    except OSError:
+        try:
+            if resynced.is_file():
+                resynced.unlink()
+        except OSError:
+            pass
+        return False
+
+    if log_file:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(
+                f"captions: audio resync applied (atempo={atempo:.6f}, "
+                f"delta {delta:+.2f}s -> {new_delta:+.2f}s)\n"
+            )
+    return True

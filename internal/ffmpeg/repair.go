@@ -6,17 +6,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
+const maxRepairAVDeltaSeconds = 5.0
+
 // TryRepairTSFile remuxes a TS into a temporary file and atomically replaces it.
 // This helps strict players decode recordings from non-graceful stops.
-func TryRepairTSFile(ffmpegPath, outputPath string, stderr io.Writer) bool {
-	if strings.ToLower(filepath.Ext(outputPath)) != ".ts" {
-		return false
-	}
-	st, err := os.Stat(outputPath)
-	if err != nil || st.Size() <= 0 {
+// When partialRecording is false and the file already decodes cleanly, repair is skipped.
+func TryRepairTSFile(ffmpegPath, outputPath string, stderr io.Writer, partialRecording bool) bool {
+	if !shouldRepairTSFile(ffmpegPath, outputPath, partialRecording) {
+		if stderr != nil {
+			_, _ = io.WriteString(stderr, "captions: TS repair skipped (complete or already skewed recording)\n")
+		}
 		return false
 	}
 	exe := ffmpegPath
@@ -139,4 +142,65 @@ func validateRepairedTS(ffmpegPath, mediaPath string, stderr io.Writer) bool {
 		return false
 	}
 	return true
+}
+
+func shouldRepairTSFile(ffmpegPath, mediaPath string, partialRecording bool) bool {
+	if strings.ToLower(filepath.Ext(mediaPath)) != ".ts" {
+		return false
+	}
+	st, err := os.Stat(mediaPath)
+	if err != nil || st.Size() <= 0 {
+		return false
+	}
+	if delta, ok := probeAVDurationDelta(ffmpegPath, mediaPath); ok {
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta > maxRepairAVDeltaSeconds {
+			return false
+		}
+	}
+	if !partialRecording && validateRepairedTS(ffmpegPath, mediaPath, nil) {
+		return false
+	}
+	return true
+}
+
+func probeStreamDuration(ffmpegPath, mediaPath, stream string) (float64, bool) {
+	ffprobe := ffprobeFromFFmpeg(ffmpegPath)
+	cmd := exec.Command(
+		ffprobe,
+		"-v", "error",
+		"-select_streams", stream,
+		"-show_entries", "stream=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		mediaPath,
+	)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return 0, false
+	}
+	for _, raw := range strings.Split(out.String(), "\n") {
+		text := strings.TrimSpace(raw)
+		if text == "" {
+			continue
+		}
+		v, err := strconv.ParseFloat(text, 64)
+		if err != nil || v <= 0 {
+			continue
+		}
+		return v, true
+	}
+	return 0, false
+}
+
+func probeAVDurationDelta(ffmpegPath, mediaPath string) (float64, bool) {
+	video, okV := probeStreamDuration(ffmpegPath, mediaPath, "v:0")
+	audio, okA := probeStreamDuration(ffmpegPath, mediaPath, "a:0")
+	if !okV || !okA {
+		return 0, false
+	}
+	return video - audio, true
 }

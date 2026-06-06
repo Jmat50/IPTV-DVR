@@ -793,7 +793,7 @@ class App(tk.Tk):
             out_size = 0
         repaired = False
         if code != 0 and out_size > 0:
-            repaired = try_repair_ts_file(out, log_file=None)
+            repaired = try_repair_ts_file(out, log_file=None, partial_recording=True)
         treat_as_success = code == 0 or (out_size > 0 and is_manual_stop_exit(code))
         live_ok = False
         if live_worker is not None:

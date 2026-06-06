@@ -268,7 +268,7 @@ def run_job(
         # normalize the partial TS so strict players can decode it.
         repaired = False
         if out_size > 0:
-            repaired = try_repair_ts_file(out, log_file=log_path)
+            repaired = try_repair_ts_file(out, log_file=log_path, partial_recording=True)
             if not repaired:
                 print("captions: partial TS repair was attempted but not applied", file=sys.stderr)
         # If ffmpeg produced a partial recording, still try caption finalize for that file.

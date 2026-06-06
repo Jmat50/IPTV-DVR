@@ -53,6 +53,7 @@ Project-level guidance for AI/code agents working in this repo.
   - `-err_detect ignore_err`
   - `-avoid_negative_ts make_zero`
   - `-bsf:v setts=pts=N/(avg_frame_rate*TB):dts=N/(avg_frame_rate*TB)`
+- **Skip TS repair** when the recording is already complete (decode probe passes) or when A/V durations diverge by >5s (e.g. after a prior setts remux). Use `reprocess_captions()` / post-only finalize for caption-only reruns — never repair on that path.
 - Keep Python/Go parity for manual-stop detection (`3221225786`, `-1073741510`, `130`) and "keep partial recording" behavior.
 - If embedded CC is visible in VLC but `.srt` is missing, inspect `gui/logs/job_<id>.log` for:
   - `captions: live worker produced no valid SRT`

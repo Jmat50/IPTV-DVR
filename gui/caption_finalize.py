@@ -10,8 +10,10 @@ from caption_mode import (
     captions_enabled,
     resolve_caption_mode,
 )
+from caption_worker import validate_srt_file
 from recorder import (
     _any_caption_sidecar,
+    _caption_sidecar_paths,
     maybe_post_extract_captions,
     probe_url_has_subtitles,
 )
@@ -52,3 +54,40 @@ def finalize_captions(
             post_processor=post_processor,
             log_file=log_file,
         )
+
+
+def reprocess_captions(
+    output_path: Path,
+    mode: CaptionMode = "post_only",
+    *,
+    post_processor: CaptionPostProcessor = "ccextractor",
+    log_file: Path | None = None,
+    replace_existing: bool = True,
+) -> bool:
+    """Re-run post-record caption extraction without modifying the TS file."""
+    if not captions_enabled(mode):
+        return False
+    if output_path.suffix.lower() != ".ts" or not output_path.is_file():
+        return False
+
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"captions: reprocess start (no TS repair): {output_path}\n")
+
+    if replace_existing:
+        for sidecar in _caption_sidecar_paths(output_path):
+            try:
+                if sidecar.is_file():
+                    sidecar.unlink()
+            except OSError:
+                pass
+
+    maybe_post_extract_captions(
+        output_path,
+        download_captions=True,
+        post_processor=post_processor,
+        log_file=log_file,
+    )
+    srt = output_path.with_suffix(".srt")
+    return validate_srt_file(srt)
