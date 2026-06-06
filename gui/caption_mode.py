@@ -132,7 +132,7 @@ def migrate_caption_mode(
         if mode != "off" or caption_mode.strip().lower() in _MODE_ALIASES:
             return mode
     if download_captions:
-        return "auto"
+        return "post_only"
     return "off"
 
 
@@ -142,14 +142,7 @@ def captions_enabled(mode: CaptionMode) -> bool:
 
 def resolve_caption_mode_with_reason(mode: CaptionMode, output_path: Path) -> tuple[CaptionMode, str]:
     if mode == "auto":
-        if output_path.suffix.lower() != ".ts":
-            return "post_only", "auto mode uses post-only for non-.ts outputs"
-        if not ccextractor_available():
-            return "post_only", f"CCExtractor not found at {ccextractor_exe()}"
-        if not ccextractor_live_supported():
-            reason = ccextractor_live_support_reason()
-            return "post_only", f"CCExtractor live mode unavailable: {reason}"
-        return "live_ccextractor", "live CCExtractor enabled"
+        return "post_only", "auto uses post-record extraction"
     if mode == "live_ccextractor":
         if output_path.suffix.lower() != ".ts":
             return "post_only", "live_ccextractor requires .ts output"

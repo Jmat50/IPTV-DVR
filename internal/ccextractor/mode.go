@@ -49,7 +49,7 @@ func MigrateMode(captionMode string, captionsFlag bool) Mode {
 		}
 	}
 	if captionsFlag {
-		return ModeAuto
+		return ModePostOnly
 	}
 	return ModeOff
 }
@@ -68,11 +68,6 @@ func Available(exePath string) bool {
 func ResolveEffectiveMode(m Mode, outputPath, ccExe string) Mode {
 	switch m {
 	case ModeAuto:
-		if strings.EqualFold(filepath.Ext(outputPath), ".ts") && Available(ccExe) {
-			if ok, _ := LiveSupported(ccExe); ok {
-				return ModeLiveCCExtractor
-			}
-		}
 		return ModePostOnly
 	case ModeLiveCCExtractor:
 		if strings.EqualFold(filepath.Ext(outputPath), ".ts") && Available(ccExe) {

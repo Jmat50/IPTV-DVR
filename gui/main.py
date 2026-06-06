@@ -813,7 +813,7 @@ class App(tk.Tk):
                 if cap.is_file() and cap.stat().st_size > 0:
                     cap_note = f"\nCaptions:\n{cap}"
                     break
-            if caption_mode != "off" and resolved_caption_mode != caption_mode:
+            if caption_mode != "off" and resolved_caption_mode != caption_mode and caption_mode != "auto":
                 cap_note += f"\nLive captions disabled: {caption_mode_reason}"
             if caption_mode != "off":
                 cap_note += f"\nPost processor: {post_processor}"

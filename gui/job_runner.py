@@ -214,8 +214,7 @@ def run_job(
         getattr(job, "caption_post_processor", "ffmpeg"),
     )
     resolved_caption_mode, caption_mode_reason = resolve_caption_mode_with_reason(caption_mode, out)
-    if caption_mode != "off" and resolved_caption_mode != caption_mode:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+    if caption_mode != "off" and resolved_caption_mode != caption_mode and caption_mode != "auto":
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"captions: mode fallback {caption_mode} -> {resolved_caption_mode}: {caption_mode_reason}\n")
     if caption_mode != "off":

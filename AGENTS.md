@@ -39,9 +39,9 @@ Project-level guidance for AI/code agents working in this repo.
 
 ## Captions
 - Recordings use FFmpeg **stream copy** (`-c copy`) for video/audio. **CEA-608 / ATSC A53** in H.264 stay in the `.ts` unless a sidecar is requested.
-- **Caption modes** (`off`, `post_only`, `live_ccextractor`, `auto`): jobs store `caption_mode`; legacy `download_captions: true` migrates to `auto`. **`auto`** uses **CCExtractor** live on `.ts` when `gui/tools/ccextractor/ccextractor.exe` (or frozen `tools/ccextractor/`) exists; otherwise **post_only**.
+- **Caption modes** (`off`, `post_only`, `live_ccextractor`, `auto`): jobs store `caption_mode`; legacy `download_captions: true` migrates to `post_only`. **`auto`** is equivalent to **`post_only`** (post-record extraction). Use **`live_ccextractor`** explicitly for tail-follow extraction during recording.
 - Jobs also store `caption_post_processor` (`ffmpeg` or `ccextractor`) for post-record extraction. In GUI, this selector is editable only for `auto` and `post_only`.
-- **Live path (Option 2):** `gui/caption_worker.py` and `internal/ccextractor` run `ccextractor --input ts --stream 15 --out srt -o <partial> <growing.ts>` on the growing recording, write `.srt.partial`, validate, then atomically rename to `.srt`. **CCExtractor 0.96.x** rejects that invocation (inverted `--stream` validation); `auto`/`live_ccextractor` fall back to post-only until a fixed runtime is bundled. FFmpeg recording is unchanged; only FFmpeg consoles get the Windows guard (not CCExtractor).
+- **Live path (optional):** `gui/caption_worker.py` and `internal/ccextractor` run `ccextractor --input ts --stream 15 --out srt -o <partial> <growing.ts>` only when mode is **`live_ccextractor`**. **CCExtractor 0.96.x** rejects that invocation (inverted `--stream` validation); `live_ccextractor` falls back to post-only until a fixed runtime is bundled.
 - **HLS subtitle renditions:** when ffprobe sees `0:s:0?`, dual-output still writes `.vtt` during record (`-c copy`).
 - **Post-record extraction:** when a sidecar is still needed, use the selected post processor:
   - `ffmpeg`: muxed `-map 0:s:0?` copy, then `movie='basename.ts'[out+subcc]` → `.srt`

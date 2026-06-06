@@ -3,8 +3,8 @@
 ## Staged enablement
 
 1. **Default for new jobs:** `caption_mode: off` (unchanged until user opts in).
-2. **Migration:** existing `download_captions: true` loads as `auto` on next config read/save.
-3. **Promote to default:** after validation, switch Job Editor default from `off` to `auto` in code.
+2. **Migration:** existing `download_captions: true` loads as `post_only` on next config read/save.
+3. **Promote to default:** after validation, switch Job Editor default from `off` to `post_only` in code.
 
 ## Acceptance checks
 
@@ -14,7 +14,7 @@
 | Mode `post_only` + post=`ffmpeg`, `.ts`, embedded 608 | `.srt` after record via FFmpeg extraction. |
 | Mode `post_only` + post=`ccextractor`, `.ts` | `.srt` after record via CCExtractor file-mode extraction. |
 | Mode `live_ccextractor`, CCExtractor present | `.srt` exists at end; may grow during record. |
-| Mode `auto`, no CCExtractor | Same as `post_only`. |
+| Mode `auto` | Same as `post_only` (post-record extraction). |
 | HLS subs on manifest | `.vtt` during record when probe succeeds. |
 | Live worker failure | Post-extract still runs; log notes live failure. |
 | Scheduled late start | Caption duration matches trimmed `-t`. |
@@ -30,7 +30,7 @@
 - Build script must not treat CCExtractor as installed when only the EXE exists.
 - Live worker invocation contract:
   - `ccextractor --input ts --stream 15 --out srt -o <recording.srt.partial> <recording.ts>`
-  - **CCExtractor 0.96.x:** `--stream <secs>` with any input file is rejected by a Rust CLI bug (`Live stream mode only supports one input file`). `auto` falls back to `post_only` until a fixed runtime is installed.
+  - **CCExtractor 0.96.x:** `--stream <secs>` with any input file is rejected by a Rust CLI bug (`Live stream mode only supports one input file`). `live_ccextractor` falls back to `post_only` until a fixed runtime is installed.
   - finalization = validate `.srt.partial` then atomic rename to `.srt`
 - Post CCExtractor invocation contract:
   - `ccextractor -1 --out=srt -o <recording.srt> <recording.ts>` (CEA-608 only; default 708 path panics on long GSN/HLS `.ts`)

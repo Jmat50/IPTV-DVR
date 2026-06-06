@@ -199,18 +199,18 @@ Recording uses **stream copy** (`-c copy`) for video and audio. Caption behavior
 | `off` | No sidecar work. |
 | `post_only` | After record: run the selected post processor (`ffmpeg` or `ccextractor`) to produce `.srt` (`.ts` only). |
 | `live_ccextractor` | During record: CCExtractor stream mode (`--stream 15 -out=srt`) writes `.srt.partial` → validated `.srt` on finish. |
-| `auto` | `live_ccextractor` when CCExtractor is installed and output is `.ts`; otherwise `post_only`. |
+| `auto` | Same as `post_only` (post-record extraction). Kept for backward compatibility with older configs. |
 
 | Delivery | What you get in `.ts` | Sidecar |
 |----------|------------------------|---------|
-| **Embedded in video** (CEA-608 / ATSC A53) | CC stays in H.264 (VLC can show CC). | Live `.srt` while recording (CCExtractor) or post-extract `.srt` (FFmpeg). |
+| **Embedded in video** (CEA-608 / ATSC A53) | CC stays in H.264 (VLC can show CC). | Post-extract `.srt` after recording (FFmpeg or CCExtractor). |
 | **HLS subtitles** (WebVTT renditions) | Video+audio copy. | Live `.vtt` when ffprobe sees a subtitle stream; post muxed copy otherwise. |
 
 **Post processor selector:** In Job Editor, choose **Post** = `ffmpeg` or `ccextractor`. This dropdown is editable only when **Captions** mode is `auto` or `post_only`.
 
 **CLI equivalent:** `--caption-post-processor ffmpeg|ccextractor` (applies to post-record extraction in `auto` / `post_only`).
 
-**Practical takeaway:** Set job **Captions** to **auto**, select your preferred **Post** processor, and use `.ts` output for broadcast IPTV to keep automated `.srt` sidecar generation.
+**Practical takeaway:** Set job **Captions** to **post_only** (or **auto**), select your preferred **Post** processor (`ccextractor` recommended for broadcast `.ts`), and use `.ts` output for automated `.srt` sidecar generation after each recording.
 
 ## Caption troubleshooting
 

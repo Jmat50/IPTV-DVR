@@ -3,7 +3,7 @@ package ccextractor
 import "testing"
 
 func TestMigrateMode(t *testing.T) {
-	if got := MigrateMode("", true); got != ModeAuto {
+	if got := MigrateMode("", true); got != ModePostOnly {
 		t.Fatalf("legacy captions: got %q", got)
 	}
 	if got := MigrateMode("live_ccextractor", false); got != ModeLiveCCExtractor {
@@ -18,6 +18,13 @@ func TestResolveEffectiveModeNonTS(t *testing.T) {
 	got := ResolveEffectiveMode(ModeLiveCCExtractor, `D:\rec.mp4`, "")
 	if got != ModePostOnly {
 		t.Fatalf("mp4 live -> post_only, got %q", got)
+	}
+}
+
+func TestResolveEffectiveModeAuto(t *testing.T) {
+	got := ResolveEffectiveMode(ModeAuto, `D:\rec.ts`, "")
+	if got != ModePostOnly {
+		t.Fatalf("auto -> post_only, got %q", got)
 	}
 }
 
