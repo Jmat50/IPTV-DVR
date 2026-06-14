@@ -664,6 +664,42 @@ def try_repair_ts_file(
     return False
 
 
+def maybe_post_scan_repair(
+    ts_path: Path,
+    *,
+    enabled: bool,
+    log_file: Path | None = None,
+    force_scan: bool = False,
+) -> bool:
+    """When enabled, scan a finished .ts and repair only if issues are detected."""
+    if not enabled:
+        return False
+    if ts_path.suffix.lower() != ".ts" or not ts_path.is_file():
+        return False
+    try:
+        if ts_path.stat().st_size <= 0:
+            return False
+    except OSError:
+        return False
+
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("captions: post scan/repair enabled; checking TS\n")
+
+    needs_repair = force_scan or should_repair_ts_file(ts_path, partial_recording=False)
+    if not needs_repair:
+        if log_file:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write("captions: post scan found no repair needed\n")
+        return False
+
+    if log_file:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write("captions: post scan detected issues; attempting repair\n")
+    return try_repair_ts_file(ts_path, log_file=log_file, partial_recording=True)
+
+
 def _validate_repaired_ts(ts_path: Path, *, log_file: Path | None = None) -> bool:
     ff = ffmpeg_exe()
     cmd = [

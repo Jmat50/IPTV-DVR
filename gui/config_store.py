@@ -18,7 +18,7 @@ from paths import config_file
 
 ScheduleMode = Literal["daily", "weekly"]
 OutputFormat = Literal["ts", "mp4", "mkv", "mov"]
-CaptionMode = Literal["off", "post_only", "live_ccextractor", "auto"]
+CaptionMode = Literal["off", "post_only", "live_ccextractor"]
 CaptionPostProcessor = Literal["ffmpeg", "ccextractor"]
 @dataclass
 class Source:
@@ -55,6 +55,7 @@ class Job:
     download_captions: bool = False  # legacy; mirrored when caption_mode != off
     caption_mode: CaptionMode = "off"
     caption_post_processor: CaptionPostProcessor = "ffmpeg"
+    post_scan_repair: bool = False
     schedule: Schedule = field(default_factory=Schedule)
 
     @staticmethod
@@ -119,6 +120,7 @@ def _job_from_dict(d: dict[str, Any]) -> Job:
         download_captions=caption_mode != "off",
         caption_mode=caption_mode,
         caption_post_processor=normalize_caption_post_processor(d.get("caption_post_processor")),
+        post_scan_repair=bool(d.get("post_scan_repair", False)),
         schedule=_schedule_from_dict(sch) if isinstance(sch, dict) else Schedule(),
     )
 

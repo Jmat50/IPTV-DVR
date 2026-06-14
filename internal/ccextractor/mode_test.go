@@ -21,16 +21,15 @@ func TestResolveEffectiveModeNonTS(t *testing.T) {
 	}
 }
 
-func TestResolveEffectiveModeAuto(t *testing.T) {
-	got := ResolveEffectiveMode(ModeAuto, `D:\rec.ts`, "")
-	if got != ModePostOnly {
-		t.Fatalf("auto -> post_only, got %q", got)
+func TestNormalizeModeLegacyAuto(t *testing.T) {
+	if got := NormalizeMode("auto"); got != ModePostOnly {
+		t.Fatalf("legacy auto: got %q", got)
 	}
 }
 
 func TestResolvePostProcessorForMode(t *testing.T) {
-	if got := ResolvePostProcessorForMode(ModeAuto, "ccextractor"); got != PostProcessorCCExtractor {
-		t.Fatalf("auto should allow ccextractor, got %q", got)
+	if got := ResolvePostProcessorForMode(ModePostOnly, "ccextractor"); got != PostProcessorCCExtractor {
+		t.Fatalf("post_only should allow ccextractor, got %q", got)
 	}
 	if got := ResolvePostProcessorForMode(ModeOff, "ccextractor"); got != PostProcessorFFmpeg {
 		t.Fatalf("off should force ffmpeg, got %q", got)

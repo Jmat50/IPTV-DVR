@@ -10,9 +10,9 @@ from typing import Literal
 from caption_worker import build_ccextractor_live_argv
 from paths import ccextractor_exe
 
-CaptionMode = Literal["off", "post_only", "live_ccextractor", "auto"]
+CaptionMode = Literal["off", "post_only", "live_ccextractor"]
 CaptionPostProcessor = Literal["ffmpeg", "ccextractor"]
-CAPTION_MODES: tuple[CaptionMode, ...] = ("off", "post_only", "live_ccextractor", "auto")
+CAPTION_MODES: tuple[CaptionMode, ...] = ("off", "post_only", "live_ccextractor")
 CAPTION_POST_PROCESSORS: tuple[CaptionPostProcessor, ...] = ("ffmpeg", "ccextractor")
 
 _MODE_ALIASES: dict[str, CaptionMode] = {
@@ -24,7 +24,7 @@ _MODE_ALIASES: dict[str, CaptionMode] = {
     "live": "live_ccextractor",
     "live_ccextractor": "live_ccextractor",
     "ccextractor": "live_ccextractor",
-    "auto": "auto",
+    "auto": "post_only",  # legacy; retired
 }
 _POST_PROCESSOR_ALIASES: dict[str, CaptionPostProcessor] = {
     "": "ffmpeg",
@@ -48,7 +48,7 @@ def normalize_caption_post_processor(raw: str | None) -> CaptionPostProcessor:
 
 
 def caption_mode_allows_post_processor(mode: CaptionMode) -> bool:
-    return mode in ("auto", "post_only")
+    return mode == "post_only"
 
 
 def resolve_post_processor_for_mode(
@@ -141,8 +141,6 @@ def captions_enabled(mode: CaptionMode) -> bool:
 
 
 def resolve_caption_mode_with_reason(mode: CaptionMode, output_path: Path) -> tuple[CaptionMode, str]:
-    if mode == "auto":
-        return "post_only", "auto uses post-record extraction"
     if mode == "live_ccextractor":
         if output_path.suffix.lower() != ".ts":
             return "post_only", "live_ccextractor requires .ts output"
@@ -165,5 +163,4 @@ def use_live_ccextractor(mode: CaptionMode, output_path: Path) -> bool:
 
 
 def use_post_extract(mode: CaptionMode) -> bool:
-    resolved = mode if mode != "auto" else "post_only"
-    return resolved in ("post_only", "live_ccextractor")
+    return mode in ("post_only", "live_ccextractor")

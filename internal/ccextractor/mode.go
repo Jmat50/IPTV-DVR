@@ -13,7 +13,6 @@ const (
 	ModeOff             Mode = "off"
 	ModePostOnly        Mode = "post_only"
 	ModeLiveCCExtractor Mode = "live_ccextractor"
-	ModeAuto            Mode = "auto"
 )
 
 // PostProcessor selects which tool handles post-record caption extraction.
@@ -33,8 +32,8 @@ func NormalizeMode(raw string) Mode {
 		return ModePostOnly
 	case "live", "live_ccextractor", "ccextractor":
 		return ModeLiveCCExtractor
-	case "auto":
-		return ModeAuto
+	case "auto": // legacy; retired
+		return ModePostOnly
 	default:
 		return ModeOff
 	}
@@ -67,8 +66,6 @@ func Available(exePath string) bool {
 // ResolveEffectiveMode picks the runtime mode for a given output file.
 func ResolveEffectiveMode(m Mode, outputPath, ccExe string) Mode {
 	switch m {
-	case ModeAuto:
-		return ModePostOnly
 	case ModeLiveCCExtractor:
 		if strings.EqualFold(filepath.Ext(outputPath), ".ts") && Available(ccExe) {
 			if ok, _ := LiveSupported(ccExe); ok {
@@ -98,7 +95,7 @@ func NormalizePostProcessor(raw string) PostProcessor {
 
 // ModeAllowsPostProcessor reports whether the UI/CLI selector should apply for a mode.
 func ModeAllowsPostProcessor(m Mode) bool {
-	return m == ModeAuto || m == ModePostOnly
+	return m == ModePostOnly
 }
 
 // ResolvePostProcessorForMode applies selector gating based on caption mode.

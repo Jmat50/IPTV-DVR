@@ -7,7 +7,7 @@ Super lightweight utility to record a live stream from an M3U playlist (or a dir
 - Manual early stop (for example Ctrl+C in the FFmpeg console, or ending the FFmpeg process) is now treated as a supported success path when output data exists.
 - Early-stopped `.ts` recordings now run a normalization/remux pass (timestamp repair + corruption-tolerant copy) before caption finalization.
 - This was added to improve strict-player compatibility, especially VLC, for partial recordings.
-- Caption sidecar behavior remains unchanged at a high level (`off`, `post_only`, `live_ccextractor`, `auto`) but docs now include updated troubleshooting for manual-stop and runtime dependency scenarios.
+- Caption sidecar behavior (`off`, `post_only`, `live_ccextractor`) with optional per-job post scan/repair.
 
 ## Build (one command)
 
@@ -34,7 +34,7 @@ The **Tkinter GUI** and frozen **`iptv-gui.exe`** expect:
 | Tool | Path (dev) | Notes |
 |------|------------|--------|
 | FFmpeg | `gui\ffmpeg\ffmpeg.exe` | GPL build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds); see [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html). |
-| CCExtractor (optional) | `gui\tools\ccextractor\ccextractor.exe` | Live `.srt` during `.ts` record; **Captions = auto** falls back to post-record FFmpeg if missing. Runtime must include sibling DLLs (`libgpac.dll`, FFmpeg DLLs, etc.). |
+| CCExtractor (optional) | `gui\tools\ccextractor\ccextractor.exe` | Post-record `.srt` via **Captions = post_only** + **Post = ccextractor**. Runtime must include sibling DLLs (`libgpac.dll`, FFmpeg DLLs, etc.). |
 
 While recording, FFmpeg subprocesses started by the app may receive the Windows console safeguards described under [FFmpeg console and accidental close](#ffmpeg-console-and-accidental-close-windows). The Tkinter GUI itself is never modified.
 
@@ -99,7 +99,7 @@ Ending the FFmpeg recording process early is supported (for example **Ctrl+C** i
   `"…\gui\iptv-gui.exe" run-job --job-id <uuid>` (frozen build), with working directory set accordingly.
 - **Run selected job now** starts the selected job immediately in background (handy for validation before waiting on a schedule).
 - **Test 15s capture** uses the selected job’s source/channel.
-- Optional per job: **Captions** mode (`off`, `auto`, `post_only`, `live_ccextractor`) — see [Closed captions](#closed-captions). Legacy configs with **download closed captions** enabled map to `auto`.
+- Optional per job: **Captions** mode (`off`, `post_only`, `live_ccextractor`) — see [Closed captions](#closed-captions). Legacy `auto` / **download closed captions** load as `post_only`.
 
 Run (Python 3.10+ with Tk on Windows):
 
@@ -199,18 +199,21 @@ Recording uses **stream copy** (`-c copy`) for video and audio. Caption behavior
 | `off` | No sidecar work. |
 | `post_only` | After record: run the selected post processor (`ffmpeg` or `ccextractor`) to produce `.srt` (`.ts` only). |
 | `live_ccextractor` | During record: CCExtractor stream mode (`--stream 15 -out=srt`) writes `.srt.partial` → validated `.srt` on finish. |
-| `auto` | Same as `post_only` (post-record extraction). Kept for backward compatibility with older configs. |
+
+Legacy configs with `caption_mode: auto` or `download_captions: true` load as **`post_only`**.
 
 | Delivery | What you get in `.ts` | Sidecar |
 |----------|------------------------|---------|
 | **Embedded in video** (CEA-608 / ATSC A53) | CC stays in H.264 (VLC can show CC). | Post-extract `.srt` after recording (FFmpeg or CCExtractor). |
 | **HLS subtitles** (WebVTT renditions) | Video+audio copy. | Live `.vtt` when ffprobe sees a subtitle stream; post muxed copy otherwise. |
 
-**Post processor selector:** In Job Editor, choose **Post** = `ffmpeg` or `ccextractor`. This dropdown is editable only when **Captions** mode is `auto` or `post_only`.
+**Post processor selector:** In Job Editor, choose **Post** = `ffmpeg` or `ccextractor`. This dropdown is editable only when **Captions** mode is `post_only`.
 
-**CLI equivalent:** `--caption-post-processor ffmpeg|ccextractor` (applies to post-record extraction in `auto` / `post_only`).
+**Post scan/repair:** Optional per-job checkbox **Post - Scan for broken stream/repair**. When checked, the finished `.ts` is scanned after recording and repaired only if issues are detected. When unchecked, no post-record TS repair runs.
 
-**Practical takeaway:** Set job **Captions** to **post_only** (or **auto**), select your preferred **Post** processor (`ccextractor` recommended for broadcast `.ts`), and use `.ts` output for automated `.srt` sidecar generation after each recording.
+**CLI equivalent:** `--caption-post-processor ffmpeg|ccextractor` (applies to post-record extraction in `post_only`). `--post-scan-repair` enables the optional TS scan/repair step.
+
+**Practical takeaway:** Set job **Captions** to **post_only**, select your preferred **Post** processor (`ccextractor` recommended for broadcast `.ts`), and use `.ts` output for automated `.srt` sidecar generation after each recording.
 
 ## Caption troubleshooting
 

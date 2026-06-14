@@ -52,7 +52,8 @@ Commands:
   record         (--m3u <file|url> --channel <name>)  OR  --url <stream-url>
                  --duration <e.g. 90m, 1h30m, 3600> --out <path.ts>
                  [--ffmpeg <path\to\ffmpeg.exe>] [--user-agent ...] [--referer ...]
-                 [--captions] [--caption-mode off|post_only|live_ccextractor|auto]
+                 [--captions] [--caption-mode off|post_only|live_ccextractor]
+                 [--post-scan-repair]
                  [--caption-post-processor ffmpeg|ccextractor]
   schedule       --at <RFC3339>  (same flags as record)
                  [--task-name <name>]
@@ -102,6 +103,7 @@ type recordOpts struct {
 	captions             bool
 	captionMode          string
 	captionPostProcessor string
+	postScanRepair       bool
 	ccExtractor          string
 }
 
@@ -116,9 +118,10 @@ func parseRecordFlags(fs *flag.FlagSet, args []string) recordOpts {
 	fs.StringVar(&o.userAgent, "user-agent", "", "override User-Agent")
 	fs.StringVar(&o.referer, "referer", "", "override Referer header")
 	fs.StringVar(&o.scheduledStart, "scheduled-start", "", "internal: planned schedule start time")
-	fs.BoolVar(&o.captions, "captions", false, "enable closed captions (same as --caption-mode auto)")
-	fs.StringVar(&o.captionMode, "caption-mode", "", "off | post_only | live_ccextractor | auto")
-	fs.StringVar(&o.captionPostProcessor, "caption-post-processor", "ffmpeg", "ffmpeg | ccextractor (used for post-record extraction in auto/post_only)")
+	fs.BoolVar(&o.captions, "captions", false, "enable closed captions (same as --caption-mode post_only)")
+	fs.StringVar(&o.captionMode, "caption-mode", "", "off | post_only | live_ccextractor")
+	fs.StringVar(&o.captionPostProcessor, "caption-post-processor", "ffmpeg", "ffmpeg | ccextractor (used for post-record extraction in post_only)")
+	fs.BoolVar(&o.postScanRepair, "post-scan-repair", false, "after record, scan finished .ts for stream errors and repair when needed")
 	fs.StringVar(&o.ccExtractor, "ccextractor", "", "path to ccextractor.exe (optional; bundled tools/ used when present)")
 	_ = fs.Parse(args)
 	return o
@@ -276,8 +279,8 @@ func runRecord(args []string) error {
 		// If ffmpeg wrote bytes but exited non-zero (manual close / stream break),
 		// normalize the partial TS so strict players can still open it.
 		if outSize > 0 {
-			if !ffmpeg.TryRepairTSFile(ff, o.out, os.Stderr, true) {
-				fmt.Fprintln(os.Stderr, "captions: partial TS repair was attempted but not applied")
+			if !ffmpeg.MaybePostScanRepair(ff, o.out, os.Stderr, o.postScanRepair, true) && o.postScanRepair {
+				fmt.Fprintln(os.Stderr, "captions: post scan repair was attempted but not applied")
 			}
 		}
 		// If partial recording exists and captions were enabled, still try caption finalize.
@@ -300,6 +303,10 @@ func runRecord(args []string) error {
 		if !liveOK && stopErr != nil {
 			fmt.Fprintf(os.Stderr, "captions: live worker stop: %v\n", stopErr)
 		}
+	}
+
+	if st, err := os.Stat(o.out); err == nil && st.Size() > 0 {
+		ffmpeg.MaybePostScanRepair(ff, o.out, os.Stderr, o.postScanRepair, false)
 	}
 
 	if !ccextractor.CaptionsEnabled(mode) {

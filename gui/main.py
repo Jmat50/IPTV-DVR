@@ -53,7 +53,7 @@ from recorder import (
     caption_sidecar_path,
     is_manual_stop_exit,
     run_ffmpeg,
-    try_repair_ts_file,
+    maybe_post_scan_repair,
 )
 from scheduler_win import (
     disable_wake_timers,
@@ -793,7 +793,18 @@ class App(tk.Tk):
             out_size = 0
         repaired = False
         if code != 0 and out_size > 0:
-            repaired = try_repair_ts_file(out, log_file=None, partial_recording=True)
+            repaired = maybe_post_scan_repair(
+                out,
+                enabled=bool(getattr(j, "post_scan_repair", False)),
+                log_file=None,
+                force_scan=True,
+            )
+        elif out_size > 0:
+            maybe_post_scan_repair(
+                out,
+                enabled=bool(getattr(j, "post_scan_repair", False)),
+                log_file=None,
+            )
         treat_as_success = code == 0 or (out_size > 0 and is_manual_stop_exit(code))
         live_ok = False
         if live_worker is not None:
@@ -813,16 +824,16 @@ class App(tk.Tk):
                 if cap.is_file() and cap.stat().st_size > 0:
                     cap_note = f"\nCaptions:\n{cap}"
                     break
-            if caption_mode != "off" and resolved_caption_mode != caption_mode and caption_mode != "auto":
+            if caption_mode != "off" and resolved_caption_mode != caption_mode:
                 cap_note += f"\nLive captions disabled: {caption_mode_reason}"
             if caption_mode != "off":
                 cap_note += f"\nPost processor: {post_processor}"
             if code != 0:
                 cap_note += f"\nFFmpeg exited {code}; kept partial recording"
                 if repaired:
-                    cap_note += "\nPartial TS repair: applied"
-                elif out_size > 0:
-                    cap_note += "\nPartial TS repair: attempted but not applied"
+                    cap_note += "\nPost scan repair: applied"
+                elif out_size > 0 and getattr(j, "post_scan_repair", False):
+                    cap_note += "\nPost scan repair: attempted but not applied"
             messagebox.showinfo("Test", f"Saved 15s sample to:\n{out}{cap_note}")
         else:
             messagebox.showerror("Test", f"ffmpeg failed (code {code})")
@@ -932,10 +943,7 @@ class JobEditor(tk.Toplevel):
 
         cap_default = "off"
         if job:
-            cap_default = normalize_caption_mode(
-                getattr(job, "caption_mode", None)
-                or ("auto" if job.download_captions else "off"),
-            )
+            cap_default = normalize_caption_mode(getattr(job, "caption_mode", None) or "off")
         self.caption_mode_v = tk.StringVar(value=cap_default)
         post_default = normalize_caption_post_processor(
             getattr(job, "caption_post_processor", "ffmpeg") if job else "ffmpeg"
@@ -947,7 +955,7 @@ class JobEditor(tk.Toplevel):
         self.caption_mode_combo = ttk.Combobox(
             cap_fr,
             textvariable=self.caption_mode_v,
-            values=["off", "auto", "post_only", "live_ccextractor"],
+            values=["off", "post_only", "live_ccextractor"],
             width=18,
             state="readonly",
         )
@@ -961,16 +969,20 @@ class JobEditor(tk.Toplevel):
             state="readonly",
         )
         self.caption_post_combo.pack(side=tk.LEFT, padx=6)
-        ttk.Label(
-            cap_fr,
-            text="auto = live .srt when CCExtractor installed",
-            font=("TkDefaultFont", 8),
-        ).pack(side=tk.LEFT)
         self.caption_mode_v.trace_add("write", lambda *_: self._sync_post_processor_state())
         self._sync_post_processor_state()
 
+        self.post_scan_repair_v = tk.BooleanVar(
+            value=bool(getattr(job, "post_scan_repair", False)) if job else False,
+        )
+        ttk.Checkbutton(
+            f,
+            text="Post - Scan for broken stream/repair",
+            variable=self.post_scan_repair_v,
+        ).grid(row=10, column=1, sticky=tk.W, pady=2)
+
         fmt_fr = ttk.Frame(f)
-        fmt_fr.grid(row=10, column=1, sticky=tk.W, pady=2)
+        fmt_fr.grid(row=11, column=1, sticky=tk.W, pady=2)
         ttk.Label(fmt_fr, text="Output format").pack(side=tk.LEFT)
         default_fmt = job.output_format if job else "ts"
         self.output_fmt_v = tk.StringVar(value=default_fmt if default_fmt in ("ts", "mp4", "mkv", "mov") else "ts")
@@ -983,7 +995,7 @@ class JobEditor(tk.Toplevel):
         ).pack(side=tk.LEFT, padx=6)
 
         bf = ttk.Frame(f)
-        bf.grid(row=11, column=0, columnspan=2, pady=12)
+        bf.grid(row=12, column=0, columnspan=2, pady=12)
         ttk.Button(bf, text="Save job", command=self.save).pack(side=tk.LEFT, padx=4)
         ttk.Button(bf, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=4)
 
@@ -1097,6 +1109,7 @@ class JobEditor(tk.Toplevel):
             self.caption_post_v.get(),
         )
         j.download_captions = cap_mode != "off"
+        j.post_scan_repair = self.post_scan_repair_v.get()
         j.schedule.mode = "daily" if mode == "daily" else "weekly"
         j.schedule.days = [] if mode == "daily" else days
         j.schedule.hour = hour

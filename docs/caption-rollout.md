@@ -14,7 +14,7 @@
 | Mode `post_only` + post=`ffmpeg`, `.ts`, embedded 608 | `.srt` after record via FFmpeg extraction. |
 | Mode `post_only` + post=`ccextractor`, `.ts` | `.srt` after record via CCExtractor file-mode extraction. |
 | Mode `live_ccextractor`, CCExtractor present | `.srt` exists at end; may grow during record. |
-| Mode `auto` | Same as `post_only` (post-record extraction). |
+| Mode `auto` (legacy) | Loads as `post_only`. |
 | HLS subs on manifest | `.vtt` during record when probe succeeds. |
 | Live worker failure | Post-extract still runs; log notes live failure. |
 | Scheduled late start | Caption duration matches trimmed `-t`. |

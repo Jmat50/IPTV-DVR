@@ -20,7 +20,7 @@ from caption_mode import (
     resolve_post_processor_for_mode,
 )
 from caption_worker import LiveCaptionWorker
-from recorder import build_ffmpeg_argv, is_manual_stop_exit, run_ffmpeg, try_repair_ts_file
+from recorder import build_ffmpeg_argv, is_manual_stop_exit, maybe_post_scan_repair, run_ffmpeg
 
 _JITTER_SECONDS = 8
 
@@ -214,7 +214,7 @@ def run_job(
         getattr(job, "caption_post_processor", "ffmpeg"),
     )
     resolved_caption_mode, caption_mode_reason = resolve_caption_mode_with_reason(caption_mode, out)
-    if caption_mode != "off" and resolved_caption_mode != caption_mode and caption_mode != "auto":
+    if caption_mode != "off" and resolved_caption_mode != caption_mode:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"captions: mode fallback {caption_mode} -> {resolved_caption_mode}: {caption_mode_reason}\n")
     if caption_mode != "off":
@@ -268,9 +268,14 @@ def run_job(
         # normalize the partial TS so strict players can decode it.
         repaired = False
         if out_size > 0:
-            repaired = try_repair_ts_file(out, log_file=log_path, partial_recording=True)
-            if not repaired:
-                print("captions: partial TS repair was attempted but not applied", file=sys.stderr)
+            repaired = maybe_post_scan_repair(
+                out,
+                enabled=bool(getattr(job, "post_scan_repair", False)),
+                log_file=log_path,
+                force_scan=True,
+            )
+            if getattr(job, "post_scan_repair", False) and not repaired:
+                print("captions: post scan repair was attempted but not applied", file=sys.stderr)
         # If ffmpeg produced a partial recording, still try caption finalize for that file.
         if out_size > 0 and caption_mode != "off":
             try:
@@ -312,6 +317,12 @@ def run_job(
             pass
         print(f"ffmpeg exited {code}; see {log_path}", file=sys.stderr)
         return code
+
+    maybe_post_scan_repair(
+        out,
+        enabled=bool(getattr(job, "post_scan_repair", False)),
+        log_file=log_path,
+    )
 
     finalize_captions(
         out,

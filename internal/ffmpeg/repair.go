@@ -204,3 +204,31 @@ func probeAVDurationDelta(ffmpegPath, mediaPath string) (float64, bool) {
 	}
 	return video - audio, true
 }
+
+// MaybePostScanRepair scans a finished TS when enabled and repairs only if needed.
+func MaybePostScanRepair(ffmpegPath, outputPath string, stderr io.Writer, enabled, forceScan bool) bool {
+	if !enabled {
+		return false
+	}
+	if strings.ToLower(filepath.Ext(outputPath)) != ".ts" {
+		return false
+	}
+	st, err := os.Stat(outputPath)
+	if err != nil || st.Size() <= 0 {
+		return false
+	}
+	if stderr != nil {
+		_, _ = io.WriteString(stderr, "captions: post scan/repair enabled; checking TS\n")
+	}
+	needsRepair := forceScan || shouldRepairTSFile(ffmpegPath, outputPath, false)
+	if !needsRepair {
+		if stderr != nil {
+			_, _ = io.WriteString(stderr, "captions: post scan found no repair needed\n")
+		}
+		return false
+	}
+	if stderr != nil {
+		_, _ = io.WriteString(stderr, "captions: post scan detected issues; attempting repair\n")
+	}
+	return TryRepairTSFile(ffmpegPath, outputPath, stderr, true)
+}
