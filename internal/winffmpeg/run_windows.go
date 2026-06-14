@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
@@ -77,48 +75,8 @@ func disableConsoleClose(hwnd syscall.Handle) {
 	procDrawMenuBar.Call(uintptr(hwnd))
 }
 
-func warnConsoleIsProtected(hwnd syscall.Handle) {
-	var titleBuf [512]uint16
-	n, _, _ := procGetWindowTextW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&titleBuf[0])), uintptr(len(titleBuf)))
-	base := "FFmpeg"
-	if n > 0 {
-		base = strings.TrimSpace(syscall.UTF16ToString(titleBuf[:n]))
-	}
-	if !strings.Contains(strings.ToLower(base), "[protected]") {
-		newTitle, err := syscall.UTF16PtrFromString(base + " [FFmpeg - PROTECTED - do not close]")
-		if err == nil {
-			procSetWindowTextW.Call(uintptr(hwnd), uintptr(unsafe.Pointer(newTitle)))
-		}
-	}
-
-	menu, _, _ := procGetSystemMenu.Call(uintptr(hwnd), 0)
-	if menu == 0 {
-		return
-	}
-	procAppendMenuW.Call(menu, uintptr(mfSeparator), 0, 0)
-	disabledTxt, err := syscall.UTF16PtrFromString("Close disabled while FFmpeg is recording")
-	if err != nil {
-		return
-	}
-	procAppendMenuW.Call(menu, uintptr(mfString|mfDisabled), 0, uintptr(unsafe.Pointer(disabledTxt)))
-	procDrawMenuBar.Call(uintptr(hwnd))
-}
-
 func armFFmpegConsoleCloseGuard(pid int) {
-	go armConsoleClose(pid)
-}
-
-func armConsoleClose(pid int) {
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		hwnd := findConsoleWindowForPID(pid)
-		if hwnd != 0 {
-			disableConsoleClose(hwnd)
-			warnConsoleIsProtected(hwnd)
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	ArmConsoleCloseGuard(pid, GuardFFmpeg)
 }
 
 // Run starts FFmpeg in a dedicated console window and applies the same close-button

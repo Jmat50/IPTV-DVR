@@ -36,7 +36,7 @@ The **Tkinter GUI** and frozen **`iptv-gui.exe`** expect:
 | FFmpeg | `gui\ffmpeg\ffmpeg.exe` | GPL build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds); see [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html). |
 | CCExtractor (optional) | `gui\tools\ccextractor\ccextractor.exe` | Post-record `.srt` via **Captions = post_only** + **Post = ccextractor**. Runtime must include sibling DLLs (`libgpac.dll`, FFmpeg DLLs, etc.). |
 
-While recording, FFmpeg subprocesses started by the app may receive the Windows console safeguards described under [FFmpeg console and accidental close](#ffmpeg-console-and-accidental-close-windows). The Tkinter GUI itself is never modified.
+While recording, **FFmpeg** and **live CCExtractor** subprocesses started by the app may receive the Windows console safeguards described under [Recording console and accidental close](#recording-console-and-accidental-close-windows). The Tkinter GUI itself is never modified.
 
 Headless recording for Task Scheduler uses the same executable:
 
@@ -46,36 +46,39 @@ iptv-gui.exe run-job --job-id <uuid>
 
 (`config.json` and `logs\` live in the same folder as `iptv-gui.exe` when you run the frozen build.)
 
-## FFmpeg console and accidental close (Windows)
+## Recording console and accidental close (Windows)
 
-On Windows, the app tries to prevent **accidental** closure of the **FFmpeg recording console** (the `ConsoleWindowClass` window owned by the FFmpeg child process, found by PID). It does **not** lock down unrelated windows.
+On Windows, the app tries to prevent **accidental** closure of **FFmpeg** and **live CCExtractor** recording consoles (the `ConsoleWindowClass` window owned by each child process, found by PID). It does **not** lock down unrelated windows.
 
 ### Protected vs not protected
 
 | Window / process | Protected from accidental close? |
 |------------------|----------------------------------|
 | **FFmpeg recording console** (when guard attaches) | Yes — system-menu **Close** removed; title shows `[FFmpeg - PROTECTED - do not close]`; grayed menu line `Close disabled while FFmpeg is recording` |
+| **Live CCExtractor console** (`live_ccextractor` mode, when guard attaches) | Yes — title shows `[CCExtractor - PROTECTED - do not close]`; grayed menu line `Close disabled while CCExtractor is extracting captions` |
 | **Tkinter main window** (`iptv-gui.exe` / `python gui\main.py`) | No — close/quit works normally (aside from save/sync prompts on exit) |
 | **GUI dialogs** (Job Editor, channel picker, wake settings, etc.) | No |
-| **CCExtractor** (live caption worker) | No — only FFmpeg consoles are guarded |
+| **Post-record CCExtractor** (file-mode extraction) | No — stdout piped to logs; no dedicated guarded console |
 | **Your shell** (cmd/PowerShell where you launched `iptvrecord`) | No |
 | **Other apps** (VLC, Explorer, etc.) | No |
 
-You may close the GUI and leave a **detached** **Run selected job now** or scheduled `run-job` recording running; stopping the recording means ending the **FFmpeg** process, not closing the Tk window.
+You may close the GUI and leave a **detached** **Run selected job now** or scheduled `run-job` recording running; stopping the recording means ending the **FFmpeg** (and live **CCExtractor**, if running) processes, not closing the Tk window.
 
 ### Where the guard runs
 
-| Path | How FFmpeg is started | Console behavior |
-|------|----------------------|------------------|
-| GUI **Test 15s capture**, **`run-job`**, caption repair/extract FFmpeg | [`gui/recorder.py`](gui/recorder.py) `run_ffmpeg` — stdout/stderr piped to log files | FFmpeg may open a console HWND; guard polls up to ~5s and applies User32 tweaks **if** that HWND exists |
-| **`iptvrecord record`** and Go post-record caption FFmpeg | [`internal/winffmpeg`](internal/winffmpeg/run_windows.go) — **`CREATE_NEW_CONSOLE`** | Dedicated visible FFmpeg console; guard attaches to that window |
-| **macOS / Linux** | Plain `exec` | No console guard |
+| Path | How the process is started | Console behavior |
+|------|---------------------------|------------------|
+| GUI **`run-job`**, **Test 15s capture**, caption repair/extract FFmpeg | [`gui/recorder.py`](gui/recorder.py) `run_ffmpeg` — stdout/stderr piped to log files | FFmpeg may open a console HWND; guard polls up to ~5s and applies User32 tweaks **if** that HWND exists |
+| GUI / **`run-job`** live CCExtractor | [`gui/caption_worker.py`](gui/caption_worker.py) — **`CREATE_NEW_CONSOLE`**, stdout piped to logs | Dedicated CCExtractor console; guard attaches to that window |
+| **`iptvrecord record`** FFmpeg and Go post-record caption FFmpeg | [`internal/winffmpeg`](internal/winffmpeg/run_windows.go) — **`CREATE_NEW_CONSOLE`** | Dedicated visible FFmpeg console; guard attaches to that window |
+| **`iptvrecord record`** live CCExtractor | [`internal/ccextractor`](internal/ccextractor/worker.go) — **`CREATE_NEW_CONSOLE`** | Dedicated CCExtractor console; guard attaches to that window |
+| **macOS / Linux** | Plain `exec` / piped subprocess | No console guard |
 
-Same User32 logic in [`gui/recorder.py`](gui/recorder.py) and [`internal/winffmpeg`](internal/winffmpeg/run_windows.go). Short-lived FFmpeg used only for post-record caption extract or TS repair gets the same guard **while that FFmpeg process runs**.
+Shared User32 logic in [`gui/console_guard.py`](gui/console_guard.py), [`internal/winffmpeg`](internal/winffmpeg/guard_windows.go), and live worker startup in [`internal/ccextractor`](internal/ccextractor/worker_start_windows.go). Short-lived FFmpeg used only for post-record caption extract or TS repair gets the same guard **while that FFmpeg process runs**.
 
 **`iptvrecord` from cmd/PowerShell:** your shell prints `running: ffmpeg ...`; FFmpeg itself runs in its **own** console window (not in the shell window).
 
-**Still allowed (not blocked by the guard):** ending FFmpeg with **Ctrl+C** in its console, Task Manager, `taskkill`, or killing the parent Python/Go host. If no FFmpeg console HWND appears within ~5s, the guard never attaches (recording still works; output goes to logs).
+**Still allowed (not blocked by the guard):** ending FFmpeg or live CCExtractor with **Ctrl+C** in its console, Task Manager, `taskkill`, or killing the parent Python/Go host. If no child console HWND appears within ~5s, the guard never attaches (recording still works; output goes to logs).
 
 ### Early stop behavior
 
@@ -112,7 +115,7 @@ python .\gui\main.py
 
 - **Windows** (primary target; FFmpeg invocation is standard and works elsewhere too).
 - **FFmpeg** on `PATH`, or pass `--ffmpeg` to `ffmpeg.exe` (e.g. a [Gyan.dev build](https://www.gyan.dev/ffmpeg/builds/)).
-- On **Windows**, `iptvrecord record` starts FFmpeg in a **dedicated console** and applies the same User32 guard on that FFmpeg window ([FFmpeg console and accidental close](#ffmpeg-console-and-accidental-close-windows)).
+- On **Windows**, `iptvrecord record` starts FFmpeg in a **dedicated console** and applies the same User32 guard on that FFmpeg window ([Recording console and accidental close](#recording-console-and-accidental-close-windows)). Live CCExtractor uses the same guard when enabled.
 
 ## Install (from source)
 
@@ -135,7 +138,7 @@ Copy `iptvrecord.exe` anywhere you like.
 
 ### Record now
 
-On **Windows**, FFmpeg runs in a **separate console**; accidental-close protection applies to that FFmpeg window only ([details](#ffmpeg-console-and-accidental-close-windows)).
+On **Windows**, FFmpeg and live CCExtractor run in **separate consoles** when applicable; accidental-close protection applies to those child windows only ([details](#recording-console-and-accidental-close-windows)).
 
 From playlist (match channel name exactly, case-insensitive, or a **unique** substring):
 

@@ -4,103 +4,14 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 
 from caption_mode import CaptionPostProcessor
 from caption_worker import build_ccextractor_post_argv, validate_srt_file
+from console_guard import GUARD_FFMPEG, start_console_close_guard
 from duration_parse import parse_duration
 from paths import ccextractor_exe, ffmpeg_exe, ffprobe_exe
-
-if sys.platform == "win32":
-    import ctypes
-    from ctypes import wintypes
-
-
-def _find_console_window_for_pid(pid: int) -> int | None:
-    if sys.platform != "win32":
-        return None
-
-    user32 = ctypes.windll.user32
-    found: int | None = None
-
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def _enum_proc(hwnd: int, _lparam: int) -> bool:
-        nonlocal found
-        proc_id = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
-        if proc_id.value != pid:
-            return True
-        class_name = ctypes.create_unicode_buffer(64)
-        user32.GetClassNameW(hwnd, class_name, len(class_name))
-        if class_name.value == "ConsoleWindowClass":
-            found = int(hwnd)
-            return False
-        return True
-
-    user32.EnumWindows(_enum_proc, 0)
-    return found
-
-
-def _disable_console_close(hwnd: int) -> None:
-    if sys.platform != "win32":
-        return
-
-    user32 = ctypes.windll.user32
-    sc_close = 0xF060
-    mf_bycommand = 0x0000
-    menu = user32.GetSystemMenu(hwnd, False)
-    if menu:
-        user32.DeleteMenu(menu, sc_close, mf_bycommand)
-        user32.DrawMenuBar(hwnd)
-
-
-def _warn_console_is_protected(hwnd: int) -> None:
-    if sys.platform != "win32":
-        return
-
-    user32 = ctypes.windll.user32
-    title = ctypes.create_unicode_buffer(512)
-    user32.GetWindowTextW(hwnd, title, len(title))
-    base = title.value.strip() or "FFmpeg"
-    if "[protected]" not in base.lower():
-        user32.SetWindowTextW(hwnd, f"{base} [FFmpeg - PROTECTED - do not close]")
-
-    menu = user32.GetSystemMenu(hwnd, False)
-    if menu:
-        mf_string = 0x0000
-        mf_separator = 0x0800
-        mf_bypostion = 0x0400
-        mf_disabled = 0x0002
-        user32.AppendMenuW(menu, mf_separator, 0, None)
-        user32.AppendMenuW(
-            menu,
-            mf_string | mf_disabled,
-            0,
-            "Close disabled while FFmpeg is recording",
-        )
-        user32.DrawMenuBar(hwnd)
-
-
-def _arm_ffmpeg_console_close_guard(pid: int) -> None:
-    if sys.platform != "win32":
-        return
-
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
-        hwnd = _find_console_window_for_pid(pid)
-        if hwnd is not None:
-            _disable_console_close(hwnd)
-            _warn_console_is_protected(hwnd)
-            return
-        time.sleep(0.10)
-
-
-def _start_ffmpeg_console_close_guard(pid: int) -> None:
-    if sys.platform != "win32":
-        return
-    threading.Thread(target=_arm_ffmpeg_console_close_guard, args=(pid,), daemon=True).start()
 
 
 def caption_sidecar_path(output_path: Path) -> Path:
@@ -452,7 +363,7 @@ def run_ffmpeg(argv: list[str], *, log_file: Path | None = None, cwd: Path | Non
         if cwd is not None:
             popen_kw["cwd"] = str(cwd)
         p = subprocess.Popen(argv, **popen_kw)
-        _start_ffmpeg_console_close_guard(p.pid)
+        start_console_close_guard(p.pid, GUARD_FFMPEG)
         assert p.stdout is not None
         for line in p.stdout:
             if log_fp:

@@ -8,6 +8,7 @@ import sys
 import threading
 from pathlib import Path
 
+from console_guard import GUARD_CCEXTRACTOR, create_new_console_flag, start_console_close_guard
 from paths import ccextractor_exe
 
 # Idle timeout (seconds) for CCExtractor tail-follow mode (--stream <secs>).
@@ -147,14 +148,18 @@ class LiveCaptionWorker:
                 self._log_fp = open(self.log_file, "a", encoding="utf-8")
                 self._log_fp.write(f"\n---\n$ {' '.join(argv)}\n")
                 self._log_fp.flush()
-            self._proc = subprocess.Popen(
-                argv,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                text=True,
-                bufsize=1,
-            )
+            popen_kw: dict = {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,
+                "stdin": subprocess.DEVNULL,
+                "text": True,
+                "bufsize": 1,
+            }
+            creation_flags = create_new_console_flag()
+            if creation_flags is not None:
+                popen_kw["creationflags"] = creation_flags
+            self._proc = subprocess.Popen(argv, **popen_kw)
+            start_console_close_guard(self._proc.pid, GUARD_CCEXTRACTOR)
         except OSError as e:
             self._log(f"captions: failed to start CCExtractor: {e}")
             return False

@@ -64,6 +64,7 @@ func (w *Worker) Start() error {
 	argv := BuildArgv(w.ccExe, w.recordingPath, w.partialPath)
 	w.appendLog(fmt.Sprintf("\n---\n$ %s\n", formatArgv(argv)))
 	cmd := exec.Command(argv[0], argv[1:]...)
+	configureLiveWorkerCmd(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -73,6 +74,7 @@ func (w *Worker) Start() error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	armLiveWorkerConsoleGuard(cmd)
 	w.cmd = cmd
 	go w.drain(stdout)
 	return nil

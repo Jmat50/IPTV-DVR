@@ -21,14 +21,16 @@ Project-level guidance for AI/code agents working in this repo.
   - outside window => skip cleanly
 - Keep manual "run now" behavior intact (no schedule-window enforcement unless scheduled metadata is present).
 - Prefer ASCII-only edits unless file already uses Unicode.
-- On **Windows**, preserve parity between `gui/recorder.py` FFmpeg console protection and `internal/winffmpeg` (close menu, title suffix, disabled "Close disabled..." line, ~5s HWND poll / `CREATE_NEW_CONSOLE` for Go).
+- On **Windows**, preserve parity between `gui/console_guard.py`, `gui/recorder.py`, `gui/caption_worker.py` (live CCExtractor), and `internal/winffmpeg` / `internal/ccextractor` (close menu, title suffix, disabled menu line, ~5s HWND poll / `CREATE_NEW_CONSOLE` for Go).
 
 ## FFmpeg console guard (Windows)
-- **`gui/recorder.py` `run_ffmpeg`:** After `Popen`, spawn a short-lived poll that finds the **FFmpeg child** `ConsoleWindowClass` HWND (matched by FFmpeg's PID) and applies User32 (`GetSystemMenu`/`DeleteMenu` SC_CLOSE, `SetWindowTextW`, `AppendMenuW`).
-- **`internal/winffmpeg`:** Used by `iptvrecord record` and `TryExtractCaptionsFromTS`; starts FFmpeg with `CREATE_NEW_CONSOLE` then runs the same guard on the FFmpeg child's PID.
+- **`gui/recorder.py` `run_ffmpeg`:** After `Popen`, spawn a short-lived poll that finds the **FFmpeg child** `ConsoleWindowClass` HWND (matched by FFmpeg's PID) and applies User32 (`GetSystemMenu`/`DeleteMenu` SC_CLOSE, `SetWindowTextW`, `AppendMenuW`). Shared helpers live in `gui/console_guard.py`.
+- **`gui/caption_worker.py` `LiveCaptionWorker`:** Live CCExtractor starts with **`CREATE_NEW_CONSOLE`** on Windows and uses the same guard helpers with **`GUARD_CCEXTRACTOR`** (title/menu text for caption extraction).
+- **`internal/winffmpeg`:** Used by `iptvrecord record` and `TryExtractCaptionsFromTS`; starts FFmpeg with `CREATE_NEW_CONSOLE` then runs `ArmConsoleCloseGuard(..., GuardFFmpeg)`.
+- **`internal/ccextractor` live worker:** On Windows, starts CCExtractor with `CREATE_NEW_CONSOLE` and `ArmConsoleCloseGuard(..., GuardCCExtractor)`.
 - **Never** attach this guard to the Tkinter GUI, **Job Editor**, or unrelated top-level HWNDs. Detached **`run-job`** recordings must keep running if the user closes the GUI; Tk `WM_DELETE_WINDOW` remains an ordinary quit (aside from persist/sync confirmations).
-- **Intent:** accidental-click protection targets **only** FFmpeg consoles tied to capture continuity; subtitle-extract FFmpeg runs are short-lived but still use the same guard while they run.
-- Changing either path: keep behavior aligned and update [README.md](README.md) "FFmpeg console and accidental close" if user-visible behavior changes.
+- **Intent:** accidental-click protection targets **FFmpeg and live CCExtractor consoles** tied to capture continuity; post-record FFmpeg/CCExtractor runs are short-lived (post CCExtractor is piped without a dedicated guarded console in Python).
+- Changing either path: keep behavior aligned and update [README.md](README.md) "Recording console and accidental close" if user-visible behavior changes.
 - Non-Windows: `winffmpeg` falls through to plain `exec` (no guard).
 - Manual user stop contract: when FFmpeg exits with a user-stop code (for example `STATUS_CONTROL_C_EXIT`) but output has data, treat run as successful early stop after repair/finalize; do not leave a false failure marker.
 
