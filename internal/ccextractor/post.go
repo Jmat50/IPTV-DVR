@@ -36,13 +36,29 @@ func TryExtractPostFromTS(outputPath, ccExe string, log io.Writer) (bool, error)
 		_, _ = fmt.Fprintf(log, "\n---\n$ %s\n", formatArgv(argv))
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
-	data, err := cmd.CombinedOutput()
+	configureLiveWorkerCmd(cmd)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return false, err
+	}
+	cmd.Stderr = cmd.Stdout
+	cmd.Stdin = nil
+	if err := cmd.Start(); err != nil {
+		return false, err
+	}
+	armLiveWorkerConsoleGuard(cmd)
+	data, readErr := io.ReadAll(stdout)
+	waitErr := cmd.Wait()
 	if len(data) > 0 && log != nil {
 		_, _ = log.Write(data)
 	}
-	if err != nil {
+	if readErr != nil {
 		_ = os.Remove(outPath)
-		return false, err
+		return false, readErr
+	}
+	if waitErr != nil {
+		_ = os.Remove(outPath)
+		return false, waitErr
 	}
 	return ValidateSRT(outPath), nil
 }

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from caption_mode import CaptionPostProcessor
 from caption_worker import build_ccextractor_post_argv, validate_srt_file
-from console_guard import GUARD_FFMPEG, start_console_close_guard
+from console_guard import GUARD_CCEXTRACTOR, GUARD_FFMPEG, ConsoleGuard, create_new_console_flag, start_console_close_guard
 from duration_parse import parse_duration
 from paths import ccextractor_exe, ffmpeg_exe, ffprobe_exe
 
@@ -253,6 +253,7 @@ def run_tool(
     *,
     log_file: Path | None = None,
     cwd: Path | None = None,
+    console_guard: ConsoleGuard | None = None,
 ) -> int:
     log_fp = None
     try:
@@ -261,6 +262,27 @@ def run_tool(
             log_fp = open(log_file, "a", encoding="utf-8")
             log_fp.write(f"\n---\n$ {' '.join(argv)}\n")
             log_fp.flush()
+        if console_guard is not None:
+            popen_kw: dict = {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,
+                "stdin": subprocess.DEVNULL,
+                "text": True,
+                "bufsize": 1,
+            }
+            if cwd is not None:
+                popen_kw["cwd"] = str(cwd)
+            creation_flags = create_new_console_flag()
+            if creation_flags is not None:
+                popen_kw["creationflags"] = creation_flags
+            p = subprocess.Popen(argv, **popen_kw)
+            start_console_close_guard(p.pid, console_guard)
+            assert p.stdout is not None
+            for line in p.stdout:
+                if log_fp:
+                    log_fp.write(line)
+                    log_fp.flush()
+            return int(p.wait())
         p = subprocess.run(
             argv,
             capture_output=True,
@@ -297,6 +319,7 @@ def try_extract_ccextractor_post(ts_path: Path, *, log_file: Path | None = None)
     code = run_tool(
         build_ccextractor_post_argv(ts_path, final_path),
         log_file=log_file,
+        console_guard=GUARD_CCEXTRACTOR,
     )
     if code != 0:
         try:

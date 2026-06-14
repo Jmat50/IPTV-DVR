@@ -29,7 +29,7 @@ Project-level guidance for AI/code agents working in this repo.
 - **`internal/winffmpeg`:** Used by `iptvrecord record` and `TryExtractCaptionsFromTS`; starts FFmpeg with `CREATE_NEW_CONSOLE` then runs `ArmConsoleCloseGuard(..., GuardFFmpeg)`.
 - **`internal/ccextractor` live worker:** On Windows, starts CCExtractor with `CREATE_NEW_CONSOLE` and `ArmConsoleCloseGuard(..., GuardCCExtractor)`.
 - **Never** attach this guard to the Tkinter GUI, **Job Editor**, or unrelated top-level HWNDs. Detached **`run-job`** recordings must keep running if the user closes the GUI; Tk `WM_DELETE_WINDOW` remains an ordinary quit (aside from persist/sync confirmations).
-- **Intent:** accidental-click protection targets **FFmpeg and live CCExtractor consoles** tied to capture continuity; post-record FFmpeg/CCExtractor runs are short-lived (post CCExtractor is piped without a dedicated guarded console in Python).
+- **Intent:** accidental-click protection targets **FFmpeg and CCExtractor consoles** tied to capture continuity; post-record CCExtractor file-mode extraction uses the same guarded console on Windows.
 - Changing either path: keep behavior aligned and update [README.md](README.md) "Recording console and accidental close" if user-visible behavior changes.
 - Non-Windows: `winffmpeg` falls through to plain `exec` (no guard).
 - Manual user stop contract: when FFmpeg exits with a user-stop code (for example `STATUS_CONTROL_C_EXIT`) but output has data, treat run as successful early stop after repair/finalize; do not leave a false failure marker.
