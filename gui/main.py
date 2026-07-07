@@ -39,6 +39,7 @@ from paths import (
     project_root,
 )
 from caption_finalize import finalize_captions, should_dual_output_vtt
+from comskip_finalize import maybe_run_comskip
 from caption_mode import (
     caption_mode_allows_post_processor,
     migrate_caption_mode,
@@ -816,6 +817,12 @@ class App(tk.Tk):
                 post_processor=post_processor,
                 live_ok=live_ok,
             )
+            maybe_run_comskip(
+                out,
+                enabled=bool(getattr(j, "comskip_enabled", False)),
+                job_duration=j.duration,
+                log_file=None,
+            )
         self.config(cursor="")
         if treat_as_success:
             cap_note = ""
@@ -981,8 +988,18 @@ class JobEditor(tk.Toplevel):
             variable=self.post_scan_repair_v,
         ).grid(row=10, column=1, sticky=tk.W, pady=2)
 
+        self.comskip_enabled_v = tk.BooleanVar(
+            value=bool(getattr(job, "comskip_enabled", False)) if job else False,
+        )
+        self.comskip_cb = ttk.Checkbutton(
+            f,
+            text="Post - Detect commercials (Comskip)",
+            variable=self.comskip_enabled_v,
+        )
+        self.comskip_cb.grid(row=11, column=1, sticky=tk.W, pady=2)
+
         fmt_fr = ttk.Frame(f)
-        fmt_fr.grid(row=11, column=1, sticky=tk.W, pady=2)
+        fmt_fr.grid(row=12, column=1, sticky=tk.W, pady=2)
         ttk.Label(fmt_fr, text="Output format").pack(side=tk.LEFT)
         default_fmt = job.output_format if job else "ts"
         self.output_fmt_v = tk.StringVar(value=default_fmt if default_fmt in ("ts", "mp4", "mkv", "mov") else "ts")
@@ -993,9 +1010,11 @@ class JobEditor(tk.Toplevel):
             width=8,
             state="readonly",
         ).pack(side=tk.LEFT, padx=6)
+        self.output_fmt_v.trace_add("write", lambda *_: self._sync_comskip_state())
+        self._sync_comskip_state()
 
         bf = ttk.Frame(f)
-        bf.grid(row=12, column=0, columnspan=2, pady=12)
+        bf.grid(row=13, column=0, columnspan=2, pady=12)
         ttk.Button(bf, text="Save job", command=self.save).pack(side=tk.LEFT, padx=4)
         ttk.Button(bf, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=4)
 
@@ -1043,6 +1062,13 @@ class JobEditor(tk.Toplevel):
         self.wait_window(picker)
         if picker.selected_name:
             self.ch_v.set(picker.selected_name)
+
+    def _sync_comskip_state(self) -> None:
+        fmt = self.output_fmt_v.get().strip().lower()
+        if fmt == "ts":
+            self.comskip_cb.state(["!disabled"])
+        else:
+            self.comskip_cb.state(["disabled"])
 
     def _sync_post_processor_state(self) -> None:
         mode = normalize_caption_mode(self.caption_mode_v.get())
@@ -1110,6 +1136,7 @@ class JobEditor(tk.Toplevel):
         )
         j.download_captions = cap_mode != "off"
         j.post_scan_repair = self.post_scan_repair_v.get()
+        j.comskip_enabled = self.comskip_enabled_v.get()
         j.schedule.mode = "daily" if mode == "daily" else "weekly"
         j.schedule.days = [] if mode == "daily" else days
         j.schedule.hour = hour

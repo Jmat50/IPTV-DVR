@@ -8,6 +8,7 @@ Super lightweight utility to record a live stream from an M3U playlist (or a dir
 - Early-stopped `.ts` recordings now run a normalization/remux pass (timestamp repair + corruption-tolerant copy) before caption finalization.
 - This was added to improve strict-player compatibility, especially VLC, for partial recordings.
 - Caption sidecar behavior (`off`, `post_only`, `live_ccextractor`) with optional per-job post scan/repair.
+- Optional per-job Comskip commercial detection (`.ts` only) with chapter sidecars.
 
 ## Build (one command)
 
@@ -18,13 +19,14 @@ cd "C:\Visual Studio\IPTV-DVR"
 powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
 ```
 
-Optional flags: `-SkipGo`, `-SkipGui`, `-SkipCCExtractor`, `-SkipTests`, `-ForceFfmpeg`, `-ForceCCExtractor`. [`scripts/build_gui_exe.ps1`](scripts/build_gui_exe.ps1) calls the same script for backward compatibility.
+Optional flags: `-SkipGo`, `-SkipGui`, `-SkipCCExtractor`, `-SkipComskip`, `-SkipTests`, `-ForceFfmpeg`, `-ForceCCExtractor`, `-ForceComskip`. [`scripts/build_gui_exe.ps1`](scripts/build_gui_exe.ps1) calls the same script for backward compatibility.
 
 Manual downloads (only if you are not using `build.ps1`):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\download_ffmpeg.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\download_ccextractor.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\download_comskip.ps1
 ```
 
 ## Bundled runtime tools (GUI)
@@ -35,6 +37,7 @@ The **Tkinter GUI** and frozen **`iptv-gui.exe`** expect:
 |------|------------|--------|
 | FFmpeg | `gui\ffmpeg\ffmpeg.exe` | GPL build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds); see [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html). |
 | CCExtractor (optional) | `gui\tools\ccextractor\ccextractor.exe` | Post-record `.srt` via **Captions = post_only** + **Post = ccextractor**. Runtime must include sibling DLLs (`libgpac.dll`, FFmpeg DLLs, etc.). |
+| Comskip (optional) | `gui\tools\comskip\comskip.exe` | Post-record commercial detection via **Post - Detect commercials (Comskip)** (`.ts` jobs only). Requires `comskip.ini` beside the exe. |
 
 While recording, **FFmpeg** and **live CCExtractor** subprocesses started by the app may receive the Windows console safeguards described under [Recording console and accidental close](#recording-console-and-accidental-close-windows). The Tkinter GUI itself is never modified.
 
@@ -214,9 +217,34 @@ Legacy configs with `caption_mode: auto` or `download_captions: true` load as **
 
 **Post scan/repair:** Optional per-job checkbox **Post - Scan for broken stream/repair**. When checked, the finished `.ts` is scanned after recording and repaired only if issues are detected. When unchecked, no post-record TS repair runs.
 
-**CLI equivalent:** `--caption-post-processor ffmpeg|ccextractor` (applies to post-record extraction in `post_only`). `--post-scan-repair` enables the optional TS scan/repair step.
+## Commercial detection (Comskip)
+
+Optional per-job checkbox **Post - Detect commercials (Comskip)** runs after recording completes (and after optional TS repair and caption finalize). The original `.ts` is never modified.
+
+| Artifact | Purpose |
+|----------|---------|
+| `<recording>.edl` | Kodi/MPlayer-style commercial breaks (`edl_skip_field=3`) |
+| `<recording>.txt` | Comskip frame cutlist (v2 header) |
+| `<recording>.chapters.ffmeta` | FFmpeg chapter metadata (episode blocks + commercial markers) |
+| `<recording>.comskip.json` | Merge manifest (mode, segments, fps) |
+
+**Requirements:** Output format must be **`.ts`**. Install Comskip with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\download_comskip.ps1
+```
+
+Bundled layout: `gui\tools\comskip\comskip.exe` + `comskip.ini` + DLLs from the official Windows zip.
+
+**Multi-episode recordings:** Long back-to-back blocks are pre-segmented using broadcast-style black/silence gaps plus duration heuristics. Comskip runs per segment when multiple episodes are detected; commercial markers are merged onto the full timeline.
+
+**CLI equivalent:** `iptvrecord record ... --comskip` (`.ts` output only).
+
+**Failure contract:** Comskip errors are logged to the job log and do not fail the recording job.
 
 **Practical takeaway:** Set job **Captions** to **post_only**, select your preferred **Post** processor (`ccextractor` recommended for broadcast `.ts`), and use `.ts` output for automated `.srt` sidecar generation after each recording.
+
+**Caption/post CLI flags:** `--caption-post-processor ffmpeg|ccextractor` (applies to post-record extraction in `post_only`). `--post-scan-repair` enables the optional TS scan/repair step.
 
 ## Caption troubleshooting
 

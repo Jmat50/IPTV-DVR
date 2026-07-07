@@ -62,3 +62,38 @@ def ccextractor_exe() -> Path:
         if p.is_file():
             return p
     return candidates[0]
+
+
+def comskip_dir() -> Path:
+    root = project_root()
+    if is_frozen():
+        return root / "tools" / "comskip"
+    return root / "gui" / "tools" / "comskip"
+
+
+def comskip_exe() -> Path:
+    root = project_root()
+    if is_frozen():
+        candidates = [root / "tools" / "comskip" / "comskip.exe"]
+    else:
+        candidates = [
+            root / "gui" / "tools" / "comskip" / "comskip.exe",
+            root / "tools" / "comskip" / "comskip.exe",
+        ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    return candidates[0]
+
+
+def comskip_ini() -> Path:
+    bundled = comskip_dir() / "comskip.ini"
+    if bundled.is_file():
+        return bundled
+    return comskip_exe().with_name("comskip.ini")
+
+
+def comskip_work_dir() -> Path:
+    d = log_dir() / "comskip_work"
+    d.mkdir(parents=True, exist_ok=True)
+    return d

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"iptv-dvr/internal/ccextractor"
+	"iptv-dvr/internal/comskip"
 	"iptv-dvr/internal/ffmpeg"
 	"iptv-dvr/internal/m3u"
 	"iptv-dvr/internal/winffmpeg"
@@ -54,6 +55,7 @@ Commands:
                  [--ffmpeg <path\to\ffmpeg.exe>] [--user-agent ...] [--referer ...]
                  [--captions] [--caption-mode off|post_only|live_ccextractor]
                  [--post-scan-repair]
+                 [--comskip]
                  [--caption-post-processor ffmpeg|ccextractor]
   schedule       --at <RFC3339>  (same flags as record)
                  [--task-name <name>]
@@ -104,7 +106,9 @@ type recordOpts struct {
 	captionMode          string
 	captionPostProcessor string
 	postScanRepair       bool
+	comskip              bool
 	ccExtractor          string
+	comskipExe           string
 }
 
 func parseRecordFlags(fs *flag.FlagSet, args []string) recordOpts {
@@ -122,7 +126,9 @@ func parseRecordFlags(fs *flag.FlagSet, args []string) recordOpts {
 	fs.StringVar(&o.captionMode, "caption-mode", "", "off | post_only | live_ccextractor")
 	fs.StringVar(&o.captionPostProcessor, "caption-post-processor", "ffmpeg", "ffmpeg | ccextractor (used for post-record extraction in post_only)")
 	fs.BoolVar(&o.postScanRepair, "post-scan-repair", false, "after record, scan finished .ts for stream errors and repair when needed")
+	fs.BoolVar(&o.comskip, "comskip", false, "after record, detect commercials with Comskip (.ts only)")
 	fs.StringVar(&o.ccExtractor, "ccextractor", "", "path to ccextractor.exe (optional; bundled tools/ used when present)")
+	fs.StringVar(&o.comskipExe, "comskip-exe", "", "path to comskip.exe (optional; bundled tools/ used when present)")
 	_ = fs.Parse(args)
 	return o
 }
@@ -284,10 +290,12 @@ func runRecord(args []string) error {
 			}
 		}
 		// If partial recording exists and captions were enabled, still try caption finalize.
-		mode := captionModeForRecord(o)
 		if outSize > 0 && ccextractor.CaptionsEnabled(mode) {
 			ffprobe := ffprobeFromFFmpeg(ff)
 			_, _ = ffmpeg.FinalizeCaptions(ff, ffprobe, o.out, mode, postProcessor, ccExe, false, os.Stderr)
+		}
+		if outSize > 0 {
+			comskip.MaybeRun(o.out, o.comskip, o.duration, ff, o.comskipExe, "", os.Stderr)
 		}
 		if outSize > 0 && isManualStopErr(err) {
 			fmt.Fprintln(os.Stderr, "ffmpeg stopped by user; keeping partial recording")
@@ -309,18 +317,18 @@ func runRecord(args []string) error {
 		ffmpeg.MaybePostScanRepair(ff, o.out, os.Stderr, o.postScanRepair, false)
 	}
 
-	if !ccextractor.CaptionsEnabled(mode) {
-		return nil
+	if ccextractor.CaptionsEnabled(mode) {
+		if !ffmpeg.SidecarHasContent(captionsPath) && !ffmpeg.AnyCaptionSidecar(o.out) {
+			ok, extractErr := ffmpeg.FinalizeCaptions(ff, ffprobe, o.out, mode, postProcessor, ccExe, liveOK, os.Stderr)
+			if extractErr != nil {
+				fmt.Fprintf(os.Stderr, "caption extract: %v\n", extractErr)
+			} else if !ok {
+				fmt.Fprintln(os.Stderr, "captions: none found in stream or recording")
+			}
+		}
 	}
-	if ffmpeg.SidecarHasContent(captionsPath) || ffmpeg.AnyCaptionSidecar(o.out) {
-		return nil
-	}
-	ok, extractErr := ffmpeg.FinalizeCaptions(ff, ffprobe, o.out, mode, postProcessor, ccExe, liveOK, os.Stderr)
-	if extractErr != nil {
-		fmt.Fprintf(os.Stderr, "caption extract: %v\n", extractErr)
-	} else if !ok {
-		fmt.Fprintln(os.Stderr, "captions: none found in stream or recording")
-	}
+
+	comskip.MaybeRun(o.out, o.comskip, o.duration, ff, o.comskipExe, "", os.Stderr)
 	return nil
 }
 

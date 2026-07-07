@@ -14,6 +14,7 @@ from duration_parse import parse_duration
 from m3u_load import find_channel, load_m3u
 from paths import log_dir
 from caption_finalize import finalize_captions, should_dual_output_vtt
+from comskip_finalize import maybe_run_comskip
 from caption_mode import (
     migrate_caption_mode,
     resolve_caption_mode_with_reason,
@@ -288,6 +289,16 @@ def run_job(
                 )
             except Exception as e:
                 print(f"captions finalize after ffmpeg error: {e}", file=sys.stderr)
+        if out_size > 0:
+            try:
+                maybe_run_comskip(
+                    out,
+                    enabled=bool(getattr(job, "comskip_enabled", False)),
+                    job_duration=job.duration,
+                    log_file=log_path,
+                )
+            except Exception as e:
+                print(f"comskip after ffmpeg error: {e}", file=sys.stderr)
         # User-driven console close can report a non-zero exit on Windows
         # even when ffmpeg already wrote a valid partial recording.
         if out_size > 0 and is_manual_stop_exit(code):
@@ -330,6 +341,13 @@ def run_job(
         post_processor=post_processor,
         log_file=log_path,
         live_ok=live_ok,
+    )
+
+    maybe_run_comskip(
+        out,
+        enabled=bool(getattr(job, "comskip_enabled", False)),
+        job_duration=job.duration,
+        log_file=log_path,
     )
 
     return 0

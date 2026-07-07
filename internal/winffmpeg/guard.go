@@ -19,6 +19,11 @@ var (
 		ToolLabel: "CCExtractor",
 		MenuText:  "Close disabled while CCExtractor is extracting captions",
 	}
+	// GuardComskip labels Comskip analysis consoles.
+	GuardComskip = ConsoleGuard{
+		ToolLabel: "Comskip",
+		MenuText:  "Close disabled while Comskip is analyzing commercials",
+	}
 )
 
 // ArmConsoleCloseGuard is a no-op on non-Windows platforms.

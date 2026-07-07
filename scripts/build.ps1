@@ -1,6 +1,7 @@
 # One-command build for IPTV-DVR (Windows).
 # - Bundled FFmpeg + FFprobe (skip if already under gui\ffmpeg)
 # - Bundled CCExtractor for live captions (skip if already under gui\tools\ccextractor)
+# - Bundled Comskip for commercial detection (skip if already under gui\tools\comskip)
 # - Go CLI: iptvrecord.exe
 # - GUI: gui\iptv-gui.exe (PyInstaller onefile)
 #
@@ -9,9 +10,11 @@
 param(
     [switch]$ForceFfmpeg,
     [switch]$ForceCCExtractor,
+    [switch]$ForceComskip,
     [switch]$SkipGo,
     [switch]$SkipGui,
     [switch]$SkipCCExtractor,
+    [switch]$SkipComskip,
     [switch]$SkipTests
 )
 
@@ -71,6 +74,35 @@ function Ensure-Ccextractor {
     & powershell -NoProfile -ExecutionPolicy Bypass -File $Script
 }
 
+function Test-ComskipPresent {
+    $CandidateDirs = @(
+        (Join-Path $Root "gui\tools\comskip"),
+        (Join-Path $Root "tools\comskip")
+    )
+    foreach ($dir in $CandidateDirs) {
+        $exe = Join-Path $dir "comskip.exe"
+        $ini = Join-Path $dir "comskip.ini"
+        if ((Test-Path $exe) -and (Test-Path $ini)) {
+            return $exe
+        }
+    }
+    return $null
+}
+
+function Ensure-Comskip {
+    param([switch]$Force)
+    $Existing = Test-ComskipPresent
+    if (-not $Force -and $null -ne $Existing) {
+        Write-Host "Bundled Comskip already present; skipping download."
+        Write-Host "  $Existing"
+        return
+    }
+    $Script = Join-Path $Root "scripts\download_comskip.ps1"
+    if (-not (Test-Path $Script)) { throw "Missing $Script" }
+    Write-Step "Installing bundled Comskip..."
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $Script
+}
+
 function Build-GoCli {
     if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
         throw "Go not found on PATH. Install Go or pass -SkipGo."
@@ -118,7 +150,13 @@ function Build-GuiExe {
         "job_runner",
         "caption_mode",
         "caption_worker",
-        "caption_finalize"
+        "caption_finalize",
+        "comskip_mode",
+        "comskip_worker",
+        "comskip_merge",
+        "episode_boundaries",
+        "comskip_chapters",
+        "comskip_finalize"
     )
     $HiddenArgs = @()
     foreach ($m in $Hidden) { $HiddenArgs += "--hidden-import"; $HiddenArgs += $m }
@@ -159,6 +197,13 @@ else {
     Write-Host "Skipping CCExtractor download (-SkipCCExtractor)."
 }
 
+if (-not $SkipComskip) {
+    Ensure-Comskip -Force:$ForceComskip
+}
+else {
+    Write-Host "Skipping Comskip download (-SkipComskip)."
+}
+
 if (-not $SkipGo) {
     Build-GoCli
 }
@@ -178,5 +223,7 @@ $FfmpegDest = Join-Path $Root "gui\ffmpeg"
 Write-Host "  FFmpeg:   $(Join-Path $FfmpegDest 'ffmpeg.exe')"
 $Ccx = Test-CcextractorPresent
 if ($Ccx) { Write-Host "  CCExtractor: $Ccx" }
+$Csk = Test-ComskipPresent
+if ($Csk) { Write-Host "  Comskip:     $Csk" }
 if (-not $SkipGo) { Write-Host "  CLI:      $(Join-Path $Root 'iptvrecord.exe')" }
 if (-not $SkipGui) { Write-Host "  GUI:      $(Join-Path $Root 'gui\iptv-gui.exe')" }

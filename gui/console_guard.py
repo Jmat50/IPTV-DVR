@@ -28,6 +28,10 @@ GUARD_CCEXTRACTOR = ConsoleGuard(
     "CCExtractor",
     "Close disabled while CCExtractor is extracting captions",
 )
+GUARD_COMSKIP = ConsoleGuard(
+    "Comskip",
+    "Close disabled while Comskip is analyzing commercials",
+)
 
 
 def create_new_console_flag() -> int | None:
