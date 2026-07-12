@@ -18,9 +18,16 @@ from comskip_merge import (
     write_merged_txt,
 )
 from comskip_mode import comskip_available, comskip_supported_output
-from comskip_worker import comskip_sidecar_edl, comskip_sidecar_txt, try_run_comskip
+from comskip_worker import (
+    comskip_sidecar_chapters,
+    comskip_sidecar_edl,
+    comskip_sidecar_failed,
+    comskip_sidecar_manifest,
+    comskip_sidecar_txt,
+    try_run_comskip,
+)
 from episode_boundaries import detect_episode_boundaries, job_duration_seconds
-from paths import comskip_ini, comskip_work_dir, ffmpeg_exe
+from paths import comskip_artifact_dir, comskip_ini, ffmpeg_exe
 from recorder import probe_stream_duration, run_ffmpeg
 
 
@@ -36,7 +43,7 @@ def _log(log_file: Path | None, message: str) -> None:
 
 
 def _sidecars_exist(output_path: Path) -> bool:
-    manifest = Path(str(output_path) + ".comskip.json")
+    manifest = comskip_sidecar_manifest(output_path)
     if manifest.is_file() and manifest.stat().st_size > 0:
         return True
     edl = comskip_sidecar_edl(output_path)
@@ -104,7 +111,7 @@ def _write_manifest(
     total_sec: float,
     commercial_count: int,
 ) -> None:
-    manifest = Path(str(output_path) + ".comskip.json")
+    manifest = comskip_sidecar_manifest(output_path)
     payload = {
         "version": 1,
         "mode": mode,
@@ -130,7 +137,7 @@ def maybe_run_comskip(
     job_duration: str,
     log_file: Path | None = None,
 ) -> bool:
-    """Run Comskip when enabled; return True when sidecars were written."""
+    """Run Comskip when enabled; return True when sidecars were written to logs."""
     if not enabled:
         return False
     if not comskip_supported_output(output_path):
@@ -143,7 +150,8 @@ def maybe_run_comskip(
         _log(log_file, "comskip: skipped (sidecars already exist)")
         return False
 
-    work_root: Path | None = None
+    artifact_dir = comskip_artifact_dir(output_path)
+    seg_root: Path | None = None
     try:
         total_sec = probe_stream_duration(output_path, "v:0") or 0.0
         if total_sec <= 0:
@@ -165,18 +173,23 @@ def maybe_run_comskip(
         mode = "whole_file"
 
         if len(segments) <= 1:
-            result = try_run_comskip(output_path, ini_path=ini, log_file=log_file)
+            result = try_run_comskip(
+                output_path,
+                ini_path=ini,
+                log_file=log_file,
+                output_dir=artifact_dir,
+            )
             if not result.ok:
                 _log(log_file, f"comskip: run failed (exit {result.exit_code})")
                 return False
             breaks = _breaks_from_sidecars(result.edl_path, result.txt_path, fps=fps)
         else:
             mode = "multi_episode"
-            work_root = comskip_work_dir() / output_path.stem
-            work_root.mkdir(parents=True, exist_ok=True)
+            seg_root = artifact_dir / "_segments"
+            seg_root.mkdir(parents=True, exist_ok=True)
             merge_inputs: list = []
             for seg in segments:
-                seg_path = work_root / f"{output_path.stem}_ep{seg.index}.ts"
+                seg_path = seg_root / f"{output_path.stem}_ep{seg.index}.ts"
                 if not _extract_segment(
                     output_path,
                     seg.start_sec,
@@ -186,7 +199,12 @@ def maybe_run_comskip(
                 ):
                     _log(log_file, f"comskip: segment extract failed for episode {seg.index}")
                     continue
-                result = try_run_comskip(seg_path, ini_path=ini, log_file=log_file)
+                result = try_run_comskip(
+                    seg_path,
+                    ini_path=ini,
+                    log_file=log_file,
+                    output_dir=seg_root,
+                )
                 if not result.ok:
                     _log(log_file, f"comskip: segment {seg.index} failed (exit {result.exit_code})")
                     continue
@@ -195,14 +213,16 @@ def maybe_run_comskip(
                 _log(log_file, "comskip: no segment produced commercial markers")
                 return False
             breaks = merge_commercial_breaks(merge_inputs, total_sec=total_sec)
-            master_edl = comskip_sidecar_edl(output_path)
-            master_txt = comskip_sidecar_txt(output_path)
-            write_merged_edl(master_edl, breaks)
-            write_merged_txt(master_txt, breaks, fps=fps, total_sec=total_sec)
+            write_merged_edl(comskip_sidecar_edl(output_path), breaks)
+            write_merged_txt(
+                comskip_sidecar_txt(output_path),
+                breaks,
+                fps=fps,
+                total_sec=total_sec,
+            )
 
-        chapters_path = Path(str(output_path) + ".chapters.ffmeta")
         write_chapters_ffmeta(
-            chapters_path,
+            comskip_sidecar_chapters(output_path),
             title=output_path.stem,
             episodes=segments if segments else [],
             commercials=breaks,
@@ -216,13 +236,16 @@ def maybe_run_comskip(
             total_sec=total_sec,
             commercial_count=len(breaks),
         )
-        _log(log_file, f"comskip: wrote {len(breaks)} commercial markers ({mode})")
+        _log(
+            log_file,
+            f"comskip: wrote {len(breaks)} commercial markers ({mode}) -> {artifact_dir}",
+        )
         return True
     except Exception:
         _log(log_file, "comskip: error during processing")
         _log(log_file, traceback.format_exc())
         try:
-            Path(str(output_path) + ".comskip.failed.txt").write_text(
+            comskip_sidecar_failed(output_path).write_text(
                 traceback.format_exc(),
                 encoding="utf-8",
             )
@@ -230,5 +253,5 @@ def maybe_run_comskip(
             pass
         return False
     finally:
-        if work_root is not None and work_root.is_dir():
-            shutil.rmtree(work_root, ignore_errors=True)
+        if seg_root is not None and seg_root.is_dir():
+            shutil.rmtree(seg_root, ignore_errors=True)

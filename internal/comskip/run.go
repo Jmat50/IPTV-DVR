@@ -17,21 +17,22 @@ type RunResult struct {
 }
 
 // BuildArgv returns argv for finished-file Comskip analysis.
-func BuildArgv(exe, ini, inputTS string) []string {
+func BuildArgv(exe, ini, inputTS, outputDir string) []string {
 	return []string{
 		exe,
 		fmt.Sprintf("--ini=%s", ini),
+		fmt.Sprintf("--output=%s", outputDir),
 		"-t",
 		inputTS,
 	}
 }
 
-func sidecarEDL(inputTS string) string {
-	return stringsTrimSuffixExt(inputTS) + ".edl"
+func sidecarEDL(outputDir, stem string) string {
+	return filepath.Join(outputDir, stem+".edl")
 }
 
-func sidecarTXT(inputTS string) string {
-	return stringsTrimSuffixExt(inputTS) + ".txt"
+func sidecarTXT(outputDir, stem string) string {
+	return filepath.Join(outputDir, stem+".txt")
 }
 
 func stringsTrimSuffixExt(path string) string {
@@ -42,20 +43,26 @@ func stringsTrimSuffixExt(path string) string {
 	return path[:len(path)-len(ext)]
 }
 
-// TryRun executes Comskip on a finished TS; sidecars are written beside inputTS.
-func TryRun(inputTS, explicitExe, explicitIni string, log io.Writer) (RunResult, error) {
+// TryRun executes Comskip on a finished TS; sidecars are written under outputDir.
+func TryRun(inputTS, explicitExe, explicitIni, outputDir string, log io.Writer) (RunResult, error) {
 	exe := ResolveExe(explicitExe)
 	ini := ResolveIni(explicitIni)
 	if !fileExists(exe) || !fileExists(ini) {
 		return RunResult{OK: false, ExitCode: 127}, fmt.Errorf("comskip not found")
 	}
-	argv := BuildArgv(exe, ini, inputTS)
+	if outputDir == "" {
+		outputDir = ArtifactDir(inputTS)
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return RunResult{}, err
+	}
+	argv := BuildArgv(exe, ini, inputTS, outputDir)
 	if log != nil {
 		_, _ = fmt.Fprintf(log, "\n---\n$ %s\n", formatArgv(argv))
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	configureCmd(cmd)
-	cmd.Dir = filepath.Dir(inputTS)
+	cmd.Dir = outputDir
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return RunResult{}, err
@@ -82,8 +89,9 @@ func TryRun(inputTS, explicitExe, explicitIni string, log io.Writer) (RunResult,
 			return RunResult{}, waitErr
 		}
 	}
-	edl := sidecarEDL(inputTS)
-	txt := sidecarTXT(inputTS)
+	stem := basenameStem(inputTS)
+	edl := sidecarEDL(outputDir, stem)
+	txt := sidecarTXT(outputDir, stem)
 	edlOK := fileSize(edl) > 0
 	txtOK := fileSize(txt) > 0
 	return RunResult{

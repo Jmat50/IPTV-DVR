@@ -7,6 +7,44 @@ import (
 	"strings"
 )
 
+func looksLikeProjectRoot(root string) bool {
+	return fileExists(filepath.Join(root, "go.mod")) ||
+		fileExists(filepath.Join(root, "config.json")) ||
+		fileExists(filepath.Join(root, "gui", "tools", "comskip", "comskip.exe")) ||
+		fileExists(filepath.Join(root, "tools", "comskip", "comskip.exe"))
+}
+
+// workRoot picks the project/install root used for logs/comskip_work.
+func workRoot() string {
+	var candidates []string
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, wd)
+	}
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		candidates = append(candidates, dir)
+		if filepath.Base(dir) == "gui" {
+			candidates = append(candidates, filepath.Dir(dir))
+		}
+	}
+	for _, c := range candidates {
+		if looksLikeProjectRoot(c) {
+			return c
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0]
+	}
+	return "."
+}
+
+// ArtifactDir returns logs/comskip_work/<stem> for Comskip sidecars and .logo files.
+func ArtifactDir(outputPath string) string {
+	dir := filepath.Join(workRoot(), "logs", "comskip_work", basenameStem(outputPath))
+	_ = os.MkdirAll(dir, 0o755)
+	return dir
+}
+
 func execLookPath(name string) (string, error) {
 	return exec.LookPath(name)
 }

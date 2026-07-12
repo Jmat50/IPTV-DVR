@@ -219,14 +219,15 @@ Legacy configs with `caption_mode: auto` or `download_captions: true` load as **
 
 ## Commercial detection (Comskip)
 
-Optional per-job checkbox **Post - Detect commercials (Comskip)** runs after recording completes (and after optional TS repair and caption finalize). The original `.ts` is never modified.
+Optional per-job checkbox **Post - Detect commercials (Comskip)** runs after recording completes (and after optional TS repair and caption finalize). The original `.ts` is never modified. Comskip artifacts (including `.logo` files) are written under `logs/comskip_work/<recording-stem>/`, not beside the recording.
 
 | Artifact | Purpose |
 |----------|---------|
-| `<recording>.edl` | Kodi/MPlayer-style commercial breaks (`edl_skip_field=3`) |
-| `<recording>.txt` | Comskip frame cutlist (v2 header) |
-| `<recording>.chapters.ffmeta` | FFmpeg chapter metadata (episode blocks + commercial markers) |
-| `<recording>.comskip.json` | Merge manifest (mode, segments, fps) |
+| `<stem>.edl` | Kodi/MPlayer-style commercial breaks (`edl_skip_field=3`) |
+| `<stem>.txt` | Comskip frame cutlist (v2 header) |
+| `<stem>.chapters.ffmeta` | FFmpeg chapter metadata (episode blocks + commercial markers) |
+| `<stem>.comskip.json` | Merge manifest (mode, segments, fps) |
+| `<stem>.logo.txt` | Comskip logo mask (when logo detection runs) |
 
 **Requirements:** Output format must be **`.ts`**. Install Comskip with:
 

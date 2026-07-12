@@ -57,10 +57,11 @@ func MaybeRun(
 		return false
 	}
 
-	workRoot := ""
+	artifactDir := ArtifactDir(outputPath)
+	segRoot := ""
 	defer func() {
-		if workRoot != "" {
-			_ = os.RemoveAll(workRoot)
+		if segRoot != "" {
+			_ = os.RemoveAll(segRoot)
 		}
 	}()
 
@@ -93,7 +94,7 @@ func MaybeRun(
 	var breaks []CommercialBreak
 
 	if len(segments) <= 1 {
-		result, err := TryRun(outputPath, explicitExe, ini, log)
+		result, err := TryRun(outputPath, explicitExe, ini, artifactDir, log)
 		if err != nil || !result.OK {
 			if log != nil {
 				_, _ = fmt.Fprintf(log, "comskip: run failed (exit %d)\n", result.ExitCode)
@@ -103,25 +104,24 @@ func MaybeRun(
 		breaks, _ = breaksFromSidecars(result.EDLPath, result.TXTPath, fps)
 	} else {
 		mode = "multi_episode"
-		var err error
-		workRoot, err = os.MkdirTemp("", "iptv_comskip_")
-		if err != nil {
+		segRoot = filepath.Join(artifactDir, "_segments")
+		if err := os.MkdirAll(segRoot, 0o755); err != nil {
 			if log != nil {
-				_, _ = fmt.Fprintf(log, "comskip: temp work dir: %v\n", err)
+				_, _ = fmt.Fprintf(log, "comskip: segment work dir: %v\n", err)
 			}
 			return false
 		}
 		var mergeInputs []segmentSidecars
 		stem := basenameStem(outputPath)
 		for _, seg := range segments {
-			segPath := filepath.Join(workRoot, fmt.Sprintf("%s_ep%d.ts", stem, seg.Index))
+			segPath := filepath.Join(segRoot, fmt.Sprintf("%s_ep%d.ts", stem, seg.Index))
 			if !extractSegment(ffmpegPath, outputPath, seg.StartSec, seg.EndSec, segPath, log) {
 				if log != nil {
 					_, _ = fmt.Fprintf(log, "comskip: segment extract failed for episode %d\n", seg.Index)
 				}
 				continue
 			}
-			result, err := TryRun(segPath, explicitExe, ini, log)
+			result, err := TryRun(segPath, explicitExe, ini, segRoot, log)
 			if err != nil || !result.OK {
 				if log != nil {
 					_, _ = fmt.Fprintf(log, "comskip: segment %d failed (exit %d)\n", seg.Index, result.ExitCode)
@@ -170,7 +170,7 @@ func MaybeRun(
 	}
 
 	if log != nil {
-		_, _ = fmt.Fprintf(log, "comskip: wrote %d commercial markers (%s)\n", len(breaks), mode)
+		_, _ = fmt.Fprintf(log, "comskip: wrote %d commercial markers (%s) -> %s\n", len(breaks), mode, artifactDir)
 	}
 	return true
 }

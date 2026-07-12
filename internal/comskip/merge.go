@@ -223,19 +223,19 @@ func WriteMergedTXT(path string, breaks []CommercialBreak, fps, totalSec float64
 }
 
 func masterEDL(outputPath string) string {
-	return stringsTrimSuffixExt(outputPath) + ".edl"
+	return filepath.Join(ArtifactDir(outputPath), basenameStem(outputPath)+".edl")
 }
 
 func masterTXT(outputPath string) string {
-	return stringsTrimSuffixExt(outputPath) + ".txt"
+	return filepath.Join(ArtifactDir(outputPath), basenameStem(outputPath)+".txt")
 }
 
 func masterChapters(outputPath string) string {
-	return outputPath + ".chapters.ffmeta"
+	return filepath.Join(ArtifactDir(outputPath), basenameStem(outputPath)+".chapters.ffmeta")
 }
 
 func masterManifest(outputPath string) string {
-	return outputPath + ".comskip.json"
+	return filepath.Join(ArtifactDir(outputPath), basenameStem(outputPath)+".comskip.json")
 }
 
 func sidecarsExist(outputPath string) bool {
