@@ -100,7 +100,7 @@ def comskip_work_dir() -> Path:
 
 
 def comskip_artifact_dir(output_path: Path) -> Path:
-    """Per-recording folder under logs for Comskip sidecars and .logo files."""
+    """Per-recording folder under logs for Comskip work logs, .logo, and non-EDL artifacts."""
     d = comskip_work_dir() / output_path.stem
     d.mkdir(parents=True, exist_ok=True)
     return d

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,7 +20,8 @@ class ComskipRunResult:
 
 
 def comskip_sidecar_edl(recording_path: Path) -> Path:
-    return comskip_artifact_dir(recording_path) / f"{recording_path.stem}.edl"
+    """User-facing EDL beside the recording (same folder as .srt)."""
+    return recording_path.with_suffix(".edl")
 
 
 def comskip_sidecar_txt(recording_path: Path) -> Path:
@@ -36,6 +38,30 @@ def comskip_sidecar_manifest(recording_path: Path) -> Path:
 
 def comskip_sidecar_failed(recording_path: Path) -> Path:
     return comskip_artifact_dir(recording_path) / f"{recording_path.stem}.comskip.failed.txt"
+
+
+def comskip_run_ok(exit_code: int, *, edl_ok: bool, txt_ok: bool) -> bool:
+    """Comskip exits 0 when no commercials are found and 1 when they are."""
+    if exit_code == 0:
+        return True
+    if exit_code == 1:
+        return edl_ok or txt_ok
+    return False
+
+
+def publish_edl_beside_recording(
+    work_edl: Path | None,
+    recording_path: Path,
+) -> Path | None:
+    """Copy a work-dir EDL next to the recording; return the published path."""
+    if work_edl is None or not work_edl.is_file() or work_edl.stat().st_size <= 0:
+        return None
+    dest = comskip_sidecar_edl(recording_path)
+    if work_edl.resolve() == dest.resolve():
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(work_edl, dest)
+    return dest
 
 
 def build_comskip_argv(
@@ -61,7 +87,7 @@ def try_run_comskip(
     log_file: Path | None = None,
     output_dir: Path | None = None,
 ) -> ComskipRunResult:
-    """Run Comskip on a finished .ts file; sidecars go under output_dir (logs)."""
+    """Run Comskip; writes work artifacts (log/logo/edl/txt) under output_dir."""
     exe = comskip_exe()
     ini = ini_path or comskip_ini()
     if not exe.is_file():
@@ -82,7 +108,7 @@ def try_run_comskip(
     txt = out / f"{input_ts.stem}.txt"
     edl_ok = edl.is_file() and edl.stat().st_size > 0
     txt_ok = txt.is_file() and txt.stat().st_size > 0
-    ok = code == 0 and (edl_ok or txt_ok)
+    ok = comskip_run_ok(code, edl_ok=edl_ok, txt_ok=txt_ok)
     return ComskipRunResult(
         ok=ok,
         exit_code=code,

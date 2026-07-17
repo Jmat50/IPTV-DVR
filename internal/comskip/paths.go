@@ -38,7 +38,7 @@ func workRoot() string {
 	return "."
 }
 
-// ArtifactDir returns logs/comskip_work/<stem> for Comskip sidecars and .logo files.
+// ArtifactDir returns logs/comskip_work/<stem> for Comskip work logs, .logo, and other non-EDL artifacts.
 func ArtifactDir(outputPath string) string {
 	dir := filepath.Join(workRoot(), "logs", "comskip_work", basenameStem(outputPath))
 	_ = os.MkdirAll(dir, 0o755)

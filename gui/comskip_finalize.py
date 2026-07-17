@@ -24,6 +24,7 @@ from comskip_worker import (
     comskip_sidecar_failed,
     comskip_sidecar_manifest,
     comskip_sidecar_txt,
+    publish_edl_beside_recording,
     try_run_comskip,
 )
 from episode_boundaries import detect_episode_boundaries, job_duration_seconds
@@ -137,7 +138,7 @@ def maybe_run_comskip(
     job_duration: str,
     log_file: Path | None = None,
 ) -> bool:
-    """Run Comskip when enabled; return True when sidecars were written to logs."""
+    """Run Comskip when enabled; EDL beside recording, work logs under logs/."""
     if not enabled:
         return False
     if not comskip_supported_output(output_path):
@@ -171,6 +172,7 @@ def maybe_run_comskip(
         ini = comskip_ini()
         breaks: list[CommercialBreak] = []
         mode = "whole_file"
+        published_edl: Path | None = None
 
         if len(segments) <= 1:
             result = try_run_comskip(
@@ -182,7 +184,12 @@ def maybe_run_comskip(
             if not result.ok:
                 _log(log_file, f"comskip: run failed (exit {result.exit_code})")
                 return False
-            breaks = _breaks_from_sidecars(result.edl_path, result.txt_path, fps=fps)
+            published_edl = publish_edl_beside_recording(result.edl_path, output_path)
+            breaks = _breaks_from_sidecars(
+                published_edl or result.edl_path,
+                result.txt_path,
+                fps=fps,
+            )
         else:
             mode = "multi_episode"
             seg_root = artifact_dir / "_segments"
@@ -213,7 +220,8 @@ def maybe_run_comskip(
                 _log(log_file, "comskip: no segment produced commercial markers")
                 return False
             breaks = merge_commercial_breaks(merge_inputs, total_sec=total_sec)
-            write_merged_edl(comskip_sidecar_edl(output_path), breaks)
+            published_edl = comskip_sidecar_edl(output_path)
+            write_merged_edl(published_edl, breaks)
             write_merged_txt(
                 comskip_sidecar_txt(output_path),
                 breaks,
@@ -236,9 +244,11 @@ def maybe_run_comskip(
             total_sec=total_sec,
             commercial_count=len(breaks),
         )
+        edl_note = f", edl={published_edl}" if published_edl is not None else ""
         _log(
             log_file,
-            f"comskip: wrote {len(breaks)} commercial markers ({mode}) -> {artifact_dir}",
+            f"comskip: wrote {len(breaks)} commercial markers ({mode}) "
+            f"-> work={artifact_dir}{edl_note}",
         )
         return True
     except Exception:

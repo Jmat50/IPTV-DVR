@@ -95,11 +95,22 @@ func TryRun(inputTS, explicitExe, explicitIni, outputDir string, log io.Writer) 
 	edlOK := fileSize(edl) > 0
 	txtOK := fileSize(txt) > 0
 	return RunResult{
-		OK:       code == 0 && (edlOK || txtOK),
+		OK:       runOK(code, edlOK, txtOK),
 		ExitCode: code,
 		EDLPath:  edl,
 		TXTPath:  txt,
 	}, nil
+}
+
+// runOK treats Comskip exit 0 (no commercials) and 1 (commercials found) as success.
+func runOK(code int, edlOK, txtOK bool) bool {
+	if code == 0 {
+		return true
+	}
+	if code == 1 {
+		return edlOK || txtOK
+	}
+	return false
 }
 
 func formatArgv(argv []string) string {

@@ -223,7 +223,7 @@ func WriteMergedTXT(path string, breaks []CommercialBreak, fps, totalSec float64
 }
 
 func masterEDL(outputPath string) string {
-	return filepath.Join(ArtifactDir(outputPath), basenameStem(outputPath)+".edl")
+	return stringsTrimSuffixExt(outputPath) + ".edl"
 }
 
 func masterTXT(outputPath string) string {
@@ -236,6 +236,24 @@ func masterChapters(outputPath string) string {
 
 func masterManifest(outputPath string) string {
 	return filepath.Join(ArtifactDir(outputPath), basenameStem(outputPath)+".comskip.json")
+}
+
+func publishEDLBesideRecording(workEDL, outputPath string) string {
+	if fileSize(workEDL) <= 0 {
+		return ""
+	}
+	dest := masterEDL(outputPath)
+	if filepath.Clean(workEDL) == filepath.Clean(dest) {
+		return dest
+	}
+	data, err := os.ReadFile(workEDL)
+	if err != nil {
+		return ""
+	}
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		return ""
+	}
+	return dest
 }
 
 func sidecarsExist(outputPath string) bool {

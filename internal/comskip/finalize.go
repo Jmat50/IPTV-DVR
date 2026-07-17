@@ -101,7 +101,12 @@ func MaybeRun(
 			}
 			return false
 		}
-		breaks, _ = breaksFromSidecars(result.EDLPath, result.TXTPath, fps)
+		publishedEDL := publishEDLBesideRecording(result.EDLPath, outputPath)
+		edlForBreaks := publishedEDL
+		if edlForBreaks == "" {
+			edlForBreaks = result.EDLPath
+		}
+		breaks, _ = breaksFromSidecars(edlForBreaks, result.TXTPath, fps)
 	} else {
 		mode = "multi_episode"
 		segRoot = filepath.Join(artifactDir, "_segments")
@@ -170,7 +175,11 @@ func MaybeRun(
 	}
 
 	if log != nil {
-		_, _ = fmt.Fprintf(log, "comskip: wrote %d commercial markers (%s) -> %s\n", len(breaks), mode, artifactDir)
+		edlNote := ""
+		if fileSize(masterEDL(outputPath)) > 0 {
+			edlNote = fmt.Sprintf(", edl=%s", masterEDL(outputPath))
+		}
+		_, _ = fmt.Fprintf(log, "comskip: wrote %d commercial markers (%s) -> work=%s%s\n", len(breaks), mode, artifactDir, edlNote)
 	}
 	return true
 }

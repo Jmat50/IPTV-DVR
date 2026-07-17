@@ -72,7 +72,8 @@ Project-level guidance for AI/code agents working in this repo.
 - Comskip applies only to `.ts` output. Non-fatal on failure (log and continue).
 - Install: `scripts/download_comskip.ps1` (Windows zip from kaashoek.com). Runtime: `comskip.exe` + `comskip.ini` + sibling DLLs under `gui/tools/comskip/`.
 - Multi-episode: `gui/episode_boundaries.py` segments long recordings; per-segment Comskip + merge in `gui/comskip_merge.py`.
-- Sidecars: `.edl`, `.txt`, `.chapters.ffmeta`, `.comskip.json`, and `.logo` files under `logs/comskip_work/<stem>/` (not beside the recording).
+- Sidecars: `.edl` beside the recording (same folder as `.srt`); `.txt`, `.chapters.ffmeta`, `.comskip.json`, Comskip `.log`, and `.logo` files under `logs/comskip_work/<stem>/`.
+- Comskip exit codes: `0` = no commercials found, `1` = commercials found (both are success when expected sidecars are present for exit `1`).
 - Go CLI parity: `iptvrecord record --comskip`.
 
 ## Notes
