@@ -152,8 +152,11 @@ class LiveCaptionWorker:
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.STDOUT,
                 "stdin": subprocess.DEVNULL,
-                "text": True,
                 "bufsize": 1,
+                # CCExtractor output is not locale-encoded; decoding with
+                # cp1252 raises UnicodeDecodeError and kills the reader.
+                "encoding": "utf-8",
+                "errors": "replace",
             }
             creation_flags = create_new_console_flag()
             if creation_flags is not None:

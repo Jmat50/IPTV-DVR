@@ -97,7 +97,8 @@ def ccextractor_live_supported() -> bool:
             p = subprocess.run(
                 cmd,
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=5,
                 cwd=str(exe.parent),
             )

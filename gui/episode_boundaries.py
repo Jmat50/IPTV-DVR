@@ -64,7 +64,8 @@ def _run_ffmpeg_filter(
         p = subprocess.run(
             cmd,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=3600,
             check=False,
         )

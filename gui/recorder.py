@@ -13,6 +13,11 @@ from console_guard import GUARD_CCEXTRACTOR, GUARD_FFMPEG, ConsoleGuard, create_
 from duration_parse import parse_duration
 from paths import ccextractor_exe, ffmpeg_exe, ffprobe_exe
 
+# External tools (FFmpeg, ffprobe, CCExtractor, Comskip) emit UTF-8 or raw
+# bytes; never decode their output with the Windows locale codepage (cp1252),
+# which raises UnicodeDecodeError on bytes like 0x90 and aborts the job.
+TOOL_OUTPUT_ENCODING: dict = {"encoding": "utf-8", "errors": "replace"}
+
 
 def caption_sidecar_path(output_path: Path) -> Path:
     return output_path.with_suffix(".vtt")
@@ -65,7 +70,7 @@ def probe_url_has_subtitles(
         "csv=p=0",
         stream_url,
     ]
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    p = subprocess.run(cmd, capture_output=True, timeout=30, **TOOL_OUTPUT_ENCODING)
     if p.returncode != 0:
         return False
     return bool((p.stdout or "").strip())
@@ -167,7 +172,7 @@ def probe_subtitle_codec(media_path: Path) -> str:
             str(media_path),
         ],
         capture_output=True,
-        text=True,
+        **TOOL_OUTPUT_ENCODING,
     )
     if p.returncode != 0:
         return ""
@@ -267,8 +272,8 @@ def run_tool(
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.STDOUT,
                 "stdin": subprocess.DEVNULL,
-                "text": True,
                 "bufsize": 1,
+                **TOOL_OUTPUT_ENCODING,
             }
             if cwd is not None:
                 popen_kw["cwd"] = str(cwd)
@@ -282,13 +287,14 @@ def run_tool(
                 if log_fp:
                     log_fp.write(line)
                     log_fp.flush()
+            p.stdout.close()
             return int(p.wait())
         p = subprocess.run(
             argv,
             capture_output=True,
-            text=True,
             cwd=str(cwd) if cwd is not None else None,
             check=False,
+            **TOOL_OUTPUT_ENCODING,
         )
         body = f"{p.stdout or ''}{p.stderr or ''}"
         if log_fp and body:
@@ -380,8 +386,8 @@ def run_ffmpeg(argv: list[str], *, log_file: Path | None = None, cwd: Path | Non
             "stdout": subprocess.PIPE,
             "stderr": subprocess.STDOUT,
             "stdin": subprocess.DEVNULL,
-            "text": True,
             "bufsize": 1,
+            **TOOL_OUTPUT_ENCODING,
         }
         if cwd is not None:
             popen_kw["cwd"] = str(cwd)
@@ -392,6 +398,7 @@ def run_ffmpeg(argv: list[str], *, log_file: Path | None = None, cwd: Path | Non
             if log_fp:
                 log_fp.write(line)
                 log_fp.flush()
+        p.stdout.close()
         return int(p.wait())
     finally:
         if log_fp:
@@ -457,8 +464,8 @@ def probe_video_frame_rate(media_path: Path) -> str:
             str(media_path),
         ],
         capture_output=True,
-        text=True,
         timeout=20,
+        **TOOL_OUTPUT_ENCODING,
     )
     if p.returncode != 0:
         return ""
@@ -494,9 +501,9 @@ def probe_stream_duration(media_path: Path, stream: str) -> float | None:
             str(media_path),
         ],
         capture_output=True,
-        text=True,
         timeout=60,
         check=False,
+        **TOOL_OUTPUT_ENCODING,
     )
     if p.returncode != 0:
         return None
@@ -651,7 +658,7 @@ def _validate_repaired_ts(ts_path: Path, *, log_file: Path | None = None) -> boo
         "null",
         "-",
     ]
-    p = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    p = subprocess.run(cmd, capture_output=True, check=False, **TOOL_OUTPUT_ENCODING)
     out = f"{p.stdout or ''}{p.stderr or ''}".lower()
     bad = (
         "non-monoton" in out
@@ -683,9 +690,9 @@ def probe_audio_bitrate(media_path: Path) -> int | None:
             str(media_path),
         ],
         capture_output=True,
-        text=True,
         timeout=60,
         check=False,
+        **TOOL_OUTPUT_ENCODING,
     )
     if p.returncode != 0:
         return None
