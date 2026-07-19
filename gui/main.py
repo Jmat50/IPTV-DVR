@@ -188,6 +188,7 @@ class App(tk.Tk):
         self.src_tree.configure(yscrollcommand=ys.set)
         self.src_tree.grid(row=0, column=0, sticky="nsew")
         ys.grid(row=0, column=1, sticky="ns")
+        self.src_tree.bind("<Double-Button-1>", self._on_source_double_click)
         sb = ttk.Frame(sf)
         sb.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
         ttk.Button(sb, text="Add source", command=self.add_source).pack(side=tk.LEFT, padx=2)
@@ -213,6 +214,7 @@ class App(tk.Tk):
         self.job_tree.configure(yscrollcommand=yj.set)
         self.job_tree.grid(row=0, column=0, sticky="nsew")
         yj.grid(row=0, column=1, sticky="ns")
+        self.job_tree.bind("<Double-Button-1>", self._on_job_double_click)
         jb = ttk.Frame(jf)
         jb.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
         jb_top = ttk.Frame(jb)
@@ -595,6 +597,14 @@ class App(tk.Tk):
         name, source = editor.result
         self.cfg.sources.append(Source.new(name, source))
         self.refresh_lists()
+
+    def _on_source_double_click(self, event) -> None:
+        if self.src_tree.identify_row(event.y):
+            self.edit_source()
+
+    def _on_job_double_click(self, event) -> None:
+        if self.job_tree.identify_row(event.y):
+            self.edit_job()
 
     def edit_source(self) -> None:
         s = self.selected_source()
