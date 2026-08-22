@@ -8,6 +8,7 @@ import traceback
 from pathlib import Path
 
 from comskip_chapters import write_chapters_ffmeta
+from comskip_ini_build import materialize_comskip_ini
 from comskip_merge import (
     CommercialBreak,
     commercial_breaks_from_txt,
@@ -18,6 +19,7 @@ from comskip_merge import (
     write_merged_txt,
 )
 from comskip_mode import comskip_available, comskip_supported_output
+from comskip_settings import ComskipSettings
 from comskip_worker import (
     comskip_sidecar_chapters,
     comskip_sidecar_edl,
@@ -28,7 +30,7 @@ from comskip_worker import (
     try_run_comskip,
 )
 from episode_boundaries import detect_episode_boundaries, job_duration_seconds
-from paths import comskip_artifact_dir, comskip_ini, ffmpeg_exe
+from paths import comskip_artifact_dir, ffmpeg_exe
 from recorder import probe_stream_duration, run_ffmpeg
 
 
@@ -137,6 +139,7 @@ def maybe_run_comskip(
     enabled: bool,
     job_duration: str,
     log_file: Path | None = None,
+    settings: ComskipSettings | None = None,
 ) -> bool:
     """Run Comskip when enabled; EDL beside recording, work logs under logs/."""
     if not enabled:
@@ -169,7 +172,12 @@ def maybe_run_comskip(
         if segments and segments[0].end_sec > 0:
             total_sec = max(total_sec, segments[-1].end_sec)
 
-        ini = comskip_ini()
+        cs = settings or ComskipSettings()
+        ini = materialize_comskip_ini(cs, artifact_dir / "comskip.ini")
+        _log(
+            log_file,
+            f"comskip: using per-job ini detect_method={cs.detect_method()} -> {ini}",
+        )
         breaks: list[CommercialBreak] = []
         mode = "whole_file"
         published_edl: Path | None = None

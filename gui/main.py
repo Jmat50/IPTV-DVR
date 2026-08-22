@@ -28,6 +28,7 @@ from config_store import (
     save_config,
     source_by_id,
 )
+from comskip_settings import ComskipSettings
 from duration_parse import parse_duration
 from job_runner import run_job
 from m3u_load import load_m3u
@@ -832,6 +833,7 @@ class App(tk.Tk):
                 enabled=bool(getattr(j, "comskip_enabled", False)),
                 job_duration=j.duration,
                 log_file=None,
+                settings=getattr(j, "comskip_settings", None),
             )
         self.config(cursor="")
         if treat_as_success:
@@ -854,6 +856,141 @@ class App(tk.Tk):
             messagebox.showinfo("Test", f"Saved 15s sample to:\n{out}{cap_note}")
         else:
             messagebox.showerror("Test", f"ffmpeg failed (code {code})")
+
+
+class ComskipSettingsDialog(tk.Toplevel):
+    """Modal editor for per-job Comskip.ini overrides."""
+
+    def __init__(self, parent: tk.Misc, *, settings: ComskipSettings) -> None:
+        super().__init__(parent)
+        self.title("Comskip settings")
+        self.transient(parent)
+        self.grab_set()
+        self.resizable(False, False)
+        self.result: ComskipSettings | None = None
+        cs = settings
+
+        f = ttk.Frame(self, padding=10)
+        f.pack(fill=tk.BOTH, expand=True)
+
+        dm_fr = ttk.LabelFrame(f, text="Detection methods", padding=4)
+        dm_fr.pack(fill=tk.X, pady=2)
+        self.cs_black_v = tk.BooleanVar(value=cs.detect_black_frame)
+        self.cs_logo_v = tk.BooleanVar(value=cs.detect_logo)
+        self.cs_scene_v = tk.BooleanVar(value=cs.detect_scene_change)
+        self.cs_fuzzy_v = tk.BooleanVar(value=cs.detect_fuzzy)
+        self.cs_cc_v = tk.BooleanVar(value=cs.detect_closed_captions)
+        self.cs_ar_v = tk.BooleanVar(value=cs.detect_aspect_ratio)
+        self.cs_silence_v = tk.BooleanVar(value=cs.detect_silence)
+        self.cs_cutscenes_v = tk.BooleanVar(value=cs.detect_cutscenes)
+        for col, (text, var) in enumerate(
+            (
+                ("Black frame", self.cs_black_v),
+                ("Logo", self.cs_logo_v),
+                ("Scene change", self.cs_scene_v),
+                ("Fuzzy", self.cs_fuzzy_v),
+                ("Closed captions", self.cs_cc_v),
+                ("Aspect ratio", self.cs_ar_v),
+                ("Silence", self.cs_silence_v),
+                ("Cutscenes", self.cs_cutscenes_v),
+            )
+        ):
+            ttk.Checkbutton(dm_fr, text=text, variable=var).grid(
+                row=col // 4, column=col % 4, sticky=tk.W, padx=4, pady=1
+            )
+
+        logo_fr = ttk.LabelFrame(f, text="Logo / subtitles", padding=4)
+        logo_fr.pack(fill=tk.X, pady=2)
+        self.cs_subtitles_v = tk.BooleanVar(value=cs.subtitles)
+        self.cs_logo_bottom_v = tk.BooleanVar(value=cs.logo_at_bottom)
+        self.cs_connect_logo_v = tk.BooleanVar(value=cs.connect_blocks_with_logo)
+        self.cs_punish_no_logo_v = tk.BooleanVar(value=cs.punish_no_logo)
+        self.cs_aggr_logo_v = tk.BooleanVar(value=cs.aggressive_logo_rejection)
+        for col, (text, var) in enumerate(
+            (
+                ("Subtitles (ignore lower half for logo)", self.cs_subtitles_v),
+                ("Logo at bottom only", self.cs_logo_bottom_v),
+                ("Connect blocks with logo", self.cs_connect_logo_v),
+                ("Punish no logo", self.cs_punish_no_logo_v),
+                ("Aggressive logo rejection", self.cs_aggr_logo_v),
+            )
+        ):
+            ttk.Checkbutton(logo_fr, text=text, variable=var).grid(
+                row=col // 2, column=col % 2, sticky=tk.W, padx=4, pady=1
+            )
+
+        size_fr = ttk.LabelFrame(f, text="Break sizes / tuning", padding=4)
+        size_fr.pack(fill=tk.X, pady=2)
+        self.cs_cut_ar_v = tk.StringVar(value=str(cs.cut_on_ar_change))
+        self.cs_ticker_v = tk.StringVar(value=str(cs.ticker_tape))
+        self.cs_shrink_v = tk.StringVar(value=str(cs.shrink_logo))
+        self.cs_min_break_v = tk.StringVar(value=str(cs.min_commercialbreak))
+        self.cs_max_break_v = tk.StringVar(value=str(cs.max_commercialbreak))
+        self.cs_min_size_v = tk.StringVar(value=str(cs.min_commercial_size))
+        self.cs_max_size_v = tk.StringVar(value=str(cs.max_commercial_size))
+        self.cs_min_show_v = tk.StringVar(value=str(cs.min_show_segment_length))
+        int_rows = (
+            ("cut_on_ar_change (0-2)", self.cs_cut_ar_v),
+            ("ticker_tape (px)", self.cs_ticker_v),
+            ("shrink_logo (sec)", self.cs_shrink_v),
+            ("min_commercialbreak", self.cs_min_break_v),
+            ("max_commercialbreak", self.cs_max_break_v),
+            ("min_commercial_size", self.cs_min_size_v),
+            ("max_commercial_size", self.cs_max_size_v),
+            ("min_show_segment_length", self.cs_min_show_v),
+        )
+        for i, (label, var) in enumerate(int_rows):
+            r, c = divmod(i, 2)
+            cell = ttk.Frame(size_fr)
+            cell.grid(row=r, column=c, sticky=tk.W, padx=4, pady=1)
+            ttk.Label(cell, text=label).pack(side=tk.LEFT)
+            ttk.Entry(cell, textvariable=var, width=8).pack(side=tk.LEFT, padx=4)
+
+        bf = ttk.Frame(f)
+        bf.pack(pady=12)
+        ttk.Button(bf, text="OK", command=self._ok).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bf, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=4)
+
+        self.update_idletasks()
+        self.geometry(f"{self.winfo_reqwidth() + 16}x{self.winfo_reqheight() + 16}")
+        self.bind("<Escape>", lambda *_: self.destroy())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def _ok(self) -> None:
+        def _int(var: tk.StringVar, default: int, *, lo: int = 0, hi: int | None = None) -> int:
+            try:
+                n = int(var.get().strip())
+            except ValueError:
+                return default
+            n = max(lo, n)
+            if hi is not None:
+                n = min(hi, n)
+            return n
+
+        self.result = ComskipSettings(
+            detect_black_frame=bool(self.cs_black_v.get()),
+            detect_logo=bool(self.cs_logo_v.get()),
+            detect_scene_change=bool(self.cs_scene_v.get()),
+            detect_fuzzy=bool(self.cs_fuzzy_v.get()),
+            detect_closed_captions=bool(self.cs_cc_v.get()),
+            detect_aspect_ratio=bool(self.cs_ar_v.get()),
+            detect_silence=bool(self.cs_silence_v.get()),
+            detect_cutscenes=bool(self.cs_cutscenes_v.get()),
+            subtitles=bool(self.cs_subtitles_v.get()),
+            logo_at_bottom=bool(self.cs_logo_bottom_v.get()),
+            connect_blocks_with_logo=bool(self.cs_connect_logo_v.get()),
+            punish_no_logo=bool(self.cs_punish_no_logo_v.get()),
+            aggressive_logo_rejection=bool(self.cs_aggr_logo_v.get()),
+            cut_on_ar_change=_int(self.cs_cut_ar_v, 1, lo=0, hi=2),
+            ticker_tape=_int(self.cs_ticker_v, 0),
+            shrink_logo=_int(self.cs_shrink_v, 5),
+            min_commercialbreak=_int(self.cs_min_break_v, 25),
+            max_commercialbreak=_int(self.cs_max_break_v, 600),
+            min_commercial_size=_int(self.cs_min_size_v, 4),
+            max_commercial_size=_int(self.cs_max_size_v, 125),
+            min_show_segment_length=_int(self.cs_min_show_v, 250),
+        )
+        self.destroy()
 
 
 class JobEditor(tk.Toplevel):
@@ -1001,12 +1138,27 @@ class JobEditor(tk.Toplevel):
         self.comskip_enabled_v = tk.BooleanVar(
             value=bool(getattr(job, "comskip_enabled", False)) if job else False,
         )
+        cs = getattr(job, "comskip_settings", None) if job else None
+        if not isinstance(cs, ComskipSettings):
+            cs = ComskipSettings()
+        self._comskip_settings = cs
+
+        comskip_row = ttk.Frame(f)
+        comskip_row.grid(row=11, column=1, sticky=tk.W, pady=2)
         self.comskip_cb = ttk.Checkbutton(
-            f,
+            comskip_row,
             text="Post - Detect commercials (Comskip)",
             variable=self.comskip_enabled_v,
+            command=self._sync_comskip_state,
         )
-        self.comskip_cb.grid(row=11, column=1, sticky=tk.W, pady=2)
+        self.comskip_cb.pack(side=tk.LEFT)
+        self.comskip_settings_btn = ttk.Button(
+            comskip_row,
+            text="Settings",
+            command=self._open_comskip_settings,
+            width=10,
+        )
+        self.comskip_settings_btn.pack(side=tk.LEFT, padx=(8, 0))
 
         fmt_fr = ttk.Frame(f)
         fmt_fr.grid(row=12, column=1, sticky=tk.W, pady=2)
@@ -1075,10 +1227,22 @@ class JobEditor(tk.Toplevel):
 
     def _sync_comskip_state(self) -> None:
         fmt = self.output_fmt_v.get().strip().lower()
-        if fmt == "ts":
+        enabled = fmt == "ts"
+        if enabled:
             self.comskip_cb.state(["!disabled"])
         else:
             self.comskip_cb.state(["disabled"])
+        settings_on = enabled and bool(self.comskip_enabled_v.get())
+        self.comskip_settings_btn.state(["!disabled"] if settings_on else ["disabled"])
+
+    def _open_comskip_settings(self) -> None:
+        dlg = ComskipSettingsDialog(self, settings=self._comskip_settings)
+        self.wait_window(dlg)
+        if dlg.result is not None:
+            self._comskip_settings = dlg.result
+
+    def _read_comskip_settings(self) -> ComskipSettings:
+        return self._comskip_settings
 
     def _sync_post_processor_state(self) -> None:
         mode = normalize_caption_mode(self.caption_mode_v.get())
@@ -1147,6 +1311,7 @@ class JobEditor(tk.Toplevel):
         j.download_captions = cap_mode != "off"
         j.post_scan_repair = self.post_scan_repair_v.get()
         j.comskip_enabled = self.comskip_enabled_v.get()
+        j.comskip_settings = self._read_comskip_settings()
         j.schedule.mode = "daily" if mode == "daily" else "weekly"
         j.schedule.days = [] if mode == "daily" else days
         j.schedule.hour = hour

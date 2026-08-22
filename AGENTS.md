@@ -67,14 +67,14 @@ Project-level guidance for AI/code agents working in this repo.
 - M3U `find_channel` resolves **exact name first**, otherwise **unique substring**. Duplicate `#EXTINF` lines with the same title use the **first** URL line in playlist order.
 
 ## Comskip (commercial detection)
-- Jobs store `comskip_enabled: bool` (default false). GUI checkbox: **Post - Detect commercials (Comskip)**.
+- Jobs store `comskip_enabled: bool` (default false) and `comskip_settings` (detect-method bits + logo/subtitle/break-size knobs; defaults match bundled `comskip.ini`). GUI: **Post - Detect commercials (Comskip)** plus a **Settings** button that opens the Comskip settings dialog. On run, materialize `logs/comskip_work/<stem>/comskip.ini` from the template + overrides (`gui/comskip_ini_build.py`, `internal/comskip/inibuild.go`).
 - Post-record order: `maybe_post_scan_repair` -> `finalize_captions` -> `maybe_run_comskip` (`gui/comskip_finalize.py`, `internal/comskip/finalize.go`).
 - Comskip applies only to `.ts` output. Non-fatal on failure (log and continue).
 - Install: `scripts/download_comskip.ps1` (Windows zip from kaashoek.com). Runtime: `comskip.exe` + `comskip.ini` + sibling DLLs under `gui/tools/comskip/`.
 - Multi-episode: `gui/episode_boundaries.py` segments long recordings; per-segment Comskip + merge in `gui/comskip_merge.py`.
 - Sidecars: `.edl` beside the recording (same folder as `.srt`); `.txt`, `.chapters.ffmeta`, `.comskip.json`, Comskip `.log`, and `.logo` files under `logs/comskip_work/<stem>/`.
 - Comskip exit codes: `0` = no commercials found, `1` = commercials found (both are success when expected sidecars are present for exit `1`).
-- Go CLI parity: `iptvrecord record --comskip`.
+- Go CLI parity: `iptvrecord record --comskip` plus `--comskip-*` flags for the same settings.
 
 ## Notes
 - Wake from sleep depends on OS power policy and hardware support.

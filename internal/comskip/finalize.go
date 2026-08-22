@@ -26,6 +26,7 @@ type manifest struct {
 }
 
 // MaybeRun executes Comskip post-processing when enabled.
+// settings may be nil to use DefaultSettings().
 func MaybeRun(
 	outputPath string,
 	enabled bool,
@@ -34,6 +35,7 @@ func MaybeRun(
 	explicitExe string,
 	explicitIni string,
 	log io.Writer,
+	settings *Settings,
 ) bool {
 	if !enabled {
 		return false
@@ -89,7 +91,25 @@ func MaybeRun(
 		totalSec = probed
 	}
 
-	ini := ResolveIni(explicitIni)
+	cs := DefaultSettings()
+	if settings != nil {
+		cs = *settings
+	}
+	ini := explicitIni
+	if ini == "" {
+		dest := filepath.Join(artifactDir, "comskip.ini")
+		built, err := MaterializeIni(cs, dest, ResolveIni(""))
+		if err != nil {
+			if log != nil {
+				_, _ = fmt.Fprintf(log, "comskip: failed to materialize ini: %v\n", err)
+			}
+			return false
+		}
+		ini = built
+		if log != nil {
+			_, _ = fmt.Fprintf(log, "comskip: using per-job ini detect_method=%d -> %s\n", cs.DetectMethod(), ini)
+		}
+	}
 	mode := "whole_file"
 	var breaks []CommercialBreak
 

@@ -296,6 +296,7 @@ def run_job(
                     enabled=bool(getattr(job, "comskip_enabled", False)),
                     job_duration=job.duration,
                     log_file=log_path,
+                    settings=getattr(job, "comskip_settings", None),
                 )
             except Exception as e:
                 print(f"comskip after ffmpeg error: {e}", file=sys.stderr)
@@ -348,6 +349,7 @@ def run_job(
         enabled=bool(getattr(job, "comskip_enabled", False)),
         job_duration=job.duration,
         log_file=log_path,
+        settings=getattr(job, "comskip_settings", None),
     )
 
     return 0

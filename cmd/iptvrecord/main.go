@@ -109,6 +109,28 @@ type recordOpts struct {
 	comskip              bool
 	ccExtractor          string
 	comskipExe           string
+	comskipDetectMethod  int
+	comskipSubtitles     bool
+	comskipLogoAtBottom  bool
+	comskipConnectLogo   bool
+	comskipPunishNoLogo  bool
+	comskipAggrLogo      bool
+	comskipCutOnAR       int
+	comskipTickerTape    int
+	comskipShrinkLogo    int
+	comskipMinBreak      int
+	comskipMaxBreak      int
+	comskipMinSize       int
+	comskipMaxSize       int
+	comskipMinShow       int
+	comskipScene         bool
+	comskipSilence       bool
+	comskipCC            bool
+	comskipCutscenes     bool
+	comskipNoBlack       bool
+	comskipNoLogo        bool
+	comskipNoFuzzy       bool
+	comskipNoAR          bool
 }
 
 func parseRecordFlags(fs *flag.FlagSet, args []string) recordOpts {
@@ -129,8 +151,69 @@ func parseRecordFlags(fs *flag.FlagSet, args []string) recordOpts {
 	fs.BoolVar(&o.comskip, "comskip", false, "after record, detect commercials with Comskip (.ts only)")
 	fs.StringVar(&o.ccExtractor, "ccextractor", "", "path to ccextractor.exe (optional; bundled tools/ used when present)")
 	fs.StringVar(&o.comskipExe, "comskip-exe", "", "path to comskip.exe (optional; bundled tools/ used when present)")
+	def := comskip.DefaultSettings()
+	fs.IntVar(&o.comskipDetectMethod, "comskip-detect-method", -1, "Comskip detect_method bitmask (-1 = use individual method flags)")
+	fs.BoolVar(&o.comskipSubtitles, "comskip-subtitles", def.Subtitles, "Comskip subtitles=1 (ignore lower half for logo)")
+	fs.BoolVar(&o.comskipLogoAtBottom, "comskip-logo-at-bottom", def.LogoAtBottom, "Comskip logo_at_bottom")
+	fs.BoolVar(&o.comskipConnectLogo, "comskip-connect-blocks-with-logo", def.ConnectBlocksWithLogo, "Comskip connect_blocks_with_logo")
+	fs.BoolVar(&o.comskipPunishNoLogo, "comskip-punish-no-logo", def.PunishNoLogo, "Comskip punish_no_logo")
+	fs.BoolVar(&o.comskipAggrLogo, "comskip-aggressive-logo-rejection", def.AggressiveLogoRejection, "Comskip aggressive_logo_rejection")
+	fs.IntVar(&o.comskipCutOnAR, "comskip-cut-on-ar-change", def.CutOnARChange, "Comskip cut_on_ar_change (0-2)")
+	fs.IntVar(&o.comskipTickerTape, "comskip-ticker-tape", def.TickerTape, "Comskip ticker_tape pixels")
+	fs.IntVar(&o.comskipShrinkLogo, "comskip-shrink-logo", def.ShrinkLogo, "Comskip shrink_logo seconds")
+	fs.IntVar(&o.comskipMinBreak, "comskip-min-commercialbreak", def.MinCommercialBreak, "Comskip min_commercialbreak")
+	fs.IntVar(&o.comskipMaxBreak, "comskip-max-commercialbreak", def.MaxCommercialBreak, "Comskip max_commercialbreak")
+	fs.IntVar(&o.comskipMinSize, "comskip-min-commercial-size", def.MinCommercialSize, "Comskip min_commercial_size")
+	fs.IntVar(&o.comskipMaxSize, "comskip-max-commercial-size", def.MaxCommercialSize, "Comskip max_commercial_size")
+	fs.IntVar(&o.comskipMinShow, "comskip-min-show-segment-length", def.MinShowSegmentLength, "Comskip min_show_segment_length")
+	fs.BoolVar(&o.comskipScene, "comskip-scene-change", def.DetectSceneChange, "enable Comskip scene-change detect bit")
+	fs.BoolVar(&o.comskipSilence, "comskip-silence", def.DetectSilence, "enable Comskip silence detect bit")
+	fs.BoolVar(&o.comskipCC, "comskip-closed-captions", def.DetectClosedCaptions, "enable Comskip closed-captions detect bit")
+	fs.BoolVar(&o.comskipCutscenes, "comskip-cutscenes", def.DetectCutscenes, "enable Comskip cutscenes detect bit")
+	fs.BoolVar(&o.comskipNoBlack, "comskip-no-black-frame", false, "disable Comskip black-frame detect bit")
+	fs.BoolVar(&o.comskipNoLogo, "comskip-no-logo", false, "disable Comskip logo detect bit")
+	fs.BoolVar(&o.comskipNoFuzzy, "comskip-no-fuzzy", false, "disable Comskip fuzzy detect bit")
+	fs.BoolVar(&o.comskipNoAR, "comskip-no-aspect-ratio", false, "disable Comskip aspect-ratio detect bit")
 	_ = fs.Parse(args)
 	return o
+}
+
+func comskipSettingsFromOpts(o recordOpts) comskip.Settings {
+	s := comskip.DefaultSettings()
+	s.Subtitles = o.comskipSubtitles
+	s.LogoAtBottom = o.comskipLogoAtBottom
+	s.ConnectBlocksWithLogo = o.comskipConnectLogo
+	s.PunishNoLogo = o.comskipPunishNoLogo
+	s.AggressiveLogoRejection = o.comskipAggrLogo
+	s.CutOnARChange = o.comskipCutOnAR
+	s.TickerTape = o.comskipTickerTape
+	s.ShrinkLogo = o.comskipShrinkLogo
+	s.MinCommercialBreak = o.comskipMinBreak
+	s.MaxCommercialBreak = o.comskipMaxBreak
+	s.MinCommercialSize = o.comskipMinSize
+	s.MaxCommercialSize = o.comskipMaxSize
+	s.MinShowSegmentLength = o.comskipMinShow
+	if o.comskipDetectMethod >= 0 {
+		m := o.comskipDetectMethod
+		s.DetectBlackFrame = m&comskip.DMBlackFrame != 0
+		s.DetectLogo = m&comskip.DMLogo != 0
+		s.DetectSceneChange = m&comskip.DMSceneChange != 0
+		s.DetectFuzzy = m&comskip.DMFuzzy != 0
+		s.DetectClosedCaptions = m&comskip.DMClosedCaptions != 0
+		s.DetectAspectRatio = m&comskip.DMAspectRatio != 0
+		s.DetectSilence = m&comskip.DMSilence != 0
+		s.DetectCutscenes = m&comskip.DMCutscenes != 0
+		return s
+	}
+	s.DetectBlackFrame = !o.comskipNoBlack
+	s.DetectLogo = !o.comskipNoLogo
+	s.DetectFuzzy = !o.comskipNoFuzzy
+	s.DetectAspectRatio = !o.comskipNoAR
+	s.DetectSceneChange = o.comskipScene
+	s.DetectSilence = o.comskipSilence
+	s.DetectClosedCaptions = o.comskipCC
+	s.DetectCutscenes = o.comskipCutscenes
+	return s
 }
 
 func captionModeForRecord(o recordOpts) ccextractor.Mode {
@@ -242,6 +325,7 @@ func runRecord(args []string) error {
 	postProcessor := ccextractor.ResolvePostProcessorForMode(mode, o.captionPostProcessor)
 	ccExe := ccextractor.ResolveExe(o.ccExtractor)
 	ffprobe := ffprobeFromFFmpeg(ff)
+	cs := comskipSettingsFromOpts(o)
 	captionsPath := ""
 	if ccextractor.CaptionsEnabled(mode) && ffmpeg.ProbeURLHasSubtitles(ffprobe, inputURL, ua, ref) {
 		captionsPath = ffmpeg.CaptionsSidecarPath(o.out)
@@ -295,7 +379,7 @@ func runRecord(args []string) error {
 			_, _ = ffmpeg.FinalizeCaptions(ff, ffprobe, o.out, mode, postProcessor, ccExe, false, os.Stderr)
 		}
 		if outSize > 0 {
-			comskip.MaybeRun(o.out, o.comskip, o.duration, ff, o.comskipExe, "", os.Stderr)
+			comskip.MaybeRun(o.out, o.comskip, o.duration, ff, o.comskipExe, "", os.Stderr, &cs)
 		}
 		if outSize > 0 && isManualStopErr(err) {
 			fmt.Fprintln(os.Stderr, "ffmpeg stopped by user; keeping partial recording")
@@ -328,7 +412,7 @@ func runRecord(args []string) error {
 		}
 	}
 
-	comskip.MaybeRun(o.out, o.comskip, o.duration, ff, o.comskipExe, "", os.Stderr)
+	comskip.MaybeRun(o.out, o.comskip, o.duration, ff, o.comskipExe, "", os.Stderr, &cs)
 	return nil
 }
 

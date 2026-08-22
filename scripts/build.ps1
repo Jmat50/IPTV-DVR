@@ -154,6 +154,8 @@ function Build-GuiExe {
         "comskip_mode",
         "comskip_worker",
         "comskip_merge",
+        "comskip_settings",
+        "comskip_ini_build",
         "episode_boundaries",
         "comskip_chapters",
         "comskip_finalize"

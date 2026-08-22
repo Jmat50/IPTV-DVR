@@ -13,6 +13,11 @@ from caption_mode import (
     normalize_caption_mode,
     normalize_caption_post_processor,
 )
+from comskip_settings import (
+    ComskipSettings,
+    comskip_settings_from_dict,
+    comskip_settings_to_dict,
+)
 from paths import config_file
 
 
@@ -57,6 +62,7 @@ class Job:
     caption_post_processor: CaptionPostProcessor = "ffmpeg"
     post_scan_repair: bool = False
     comskip_enabled: bool = False
+    comskip_settings: ComskipSettings = field(default_factory=ComskipSettings)
     schedule: Schedule = field(default_factory=Schedule)
 
     @staticmethod
@@ -123,6 +129,7 @@ def _job_from_dict(d: dict[str, Any]) -> Job:
         caption_post_processor=normalize_caption_post_processor(d.get("caption_post_processor")),
         post_scan_repair=bool(d.get("post_scan_repair", False)),
         comskip_enabled=bool(d.get("comskip_enabled", False)),
+        comskip_settings=comskip_settings_from_dict(d.get("comskip_settings")),
         schedule=_schedule_from_dict(sch) if isinstance(sch, dict) else Schedule(),
     )
 
@@ -148,6 +155,9 @@ def _job_to_dict(job: Job) -> dict[str, Any]:
     d["download_captions"] = mode != "off"
     d["caption_post_processor"] = normalize_caption_post_processor(
         getattr(job, "caption_post_processor", "ffmpeg")
+    )
+    d["comskip_settings"] = comskip_settings_to_dict(
+        getattr(job, "comskip_settings", None) or ComskipSettings()
     )
     return d
 

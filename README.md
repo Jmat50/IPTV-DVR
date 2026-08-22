@@ -229,6 +229,8 @@ Optional per-job checkbox **Post - Detect commercials (Comskip)** runs after rec
 | `<stem>.comskip.json` | `logs/comskip_work/<stem>/` | Merge manifest (mode, segments, fps) |
 | `<stem>.log` / `<stem>.logo.txt` | `logs/comskip_work/<stem>/` | Comskip run log and logo mask |
 
+**Per-job settings:** With Comskip enabled and `.ts` output, use **Settings** next to **Post - Detect commercials (Comskip)** to edit detect-method bits (black/logo/scene/fuzzy/CC/AR/silence/cutscenes), logo/subtitle knobs, and break-size windows. At run time the app writes `logs/comskip_work/<stem>/comskip.ini` from the bundled template plus those overrides. Defaults match the bundled ini so existing jobs are unchanged until you edit them.
+
 **Requirements:** Output format must be **`.ts`**. Install Comskip with:
 
 ```powershell
@@ -239,7 +241,7 @@ Bundled layout: `gui\tools\comskip\comskip.exe` + `comskip.ini` + DLLs from the 
 
 **Multi-episode recordings:** Long back-to-back blocks are pre-segmented using broadcast-style black/silence gaps plus duration heuristics. Comskip runs per segment when multiple episodes are detected; commercial markers are merged onto the full timeline.
 
-**CLI equivalent:** `iptvrecord record ... --comskip` (`.ts` output only).
+**CLI equivalent:** `iptvrecord record ... --comskip` (`.ts` output only). Matching `--comskip-*` flags override detect methods and logo/break-size knobs (same as Job Editor).
 
 **Failure contract:** Comskip errors are logged to the job log and do not fail the recording job.
 
