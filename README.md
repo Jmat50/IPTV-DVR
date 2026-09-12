@@ -2,13 +2,6 @@
 
 Super lightweight utility to record a live stream from an M3U playlist (or a direct URL) using FFmpeg stream copy. This allows for lossless capture of a live stream without re-encoding.
 
-## May 2026 update
-
-- Manual early stop (for example Ctrl+C in the FFmpeg console, or ending the FFmpeg process) is now treated as a supported success path when output data exists.
-- Early-stopped `.ts` recordings now run a normalization/remux pass (timestamp repair + corruption-tolerant copy) before caption finalization.
-- This was added to improve strict-player compatibility, especially VLC, for partial recordings.
-- Caption sidecar behavior (`off`, `post_only`, `live_ccextractor`) with optional per-job post scan/repair.
-- Optional per-job Comskip commercial detection (`.ts` only) with chapter sidecars.
 
 ## Build (one command)
 
