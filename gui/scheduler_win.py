@@ -97,6 +97,37 @@ def _schedule_meta_args(job: Job) -> str:
     return base
 
 
+def task_launch_log_path(work_dir: Path) -> Path:
+    """Log file for Task Scheduler launch attempts (beside config for frozen builds)."""
+    return Path(work_dir) / "logs" / "task_launch.log"
+
+
+def build_cmd_wrapper_argument(
+    *,
+    launcher: Path,
+    argument: str,
+    log_file: Path,
+    job_id: str,
+) -> str:
+    """
+    Build the Arguments string for cmd.exe so Task Scheduler launches via a logged wrapper.
+
+    Uses /v:on so !ERRORLEVEL! reflects the launcher exit code after the run.
+    Form: /v:on /c "(echo start...)>>"log" & "launcher" args >>"log" 2>&1 & (echo exit...)>>"log""
+    """
+    launch = f'"{launcher}" {argument}'.strip()
+    log = str(log_file)
+    # Capture RC before the echo (which would otherwise reset ERRORLEVEL to 0).
+    inner = (
+        f'(echo IPTVRecApp start %DATE% %TIME% job={job_id})>>"{log}" '
+        f'& {launch} >>"{log}" 2>&1 '
+        f'& set "IPTV_RC=!ERRORLEVEL!" '
+        f'& (echo IPTVRecApp exit !IPTV_RC! job={job_id})>>"{log}" '
+        f'& exit /b !IPTV_RC!'
+    )
+    return f'/v:on /c "{inner}"'
+
+
 def register_job_task(
     job: Job,
     *,
@@ -104,24 +135,43 @@ def register_job_task(
     argument: str,
     work_dir: Path,
 ) -> tuple[bool, str]:
-    """Create or replace one scheduled task. *argument* is the full task Arguments string (after the program)."""
+    """Create or replace one scheduled task. *argument* is the full args after the program."""
     name = task_name_for_job(job.id)
     try:
         trig = _trigger_ps(job)
     except ValueError as e:
         return False, str(e)
 
-    arg_ps = _ps_quote(argument)
+    log_file = task_launch_log_path(work_dir)
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return False, f"could not create log dir {log_file.parent}: {e}"
+
+    cmd_arg = build_cmd_wrapper_argument(
+        launcher=Path(launcher),
+        argument=argument,
+        log_file=log_file,
+        job_id=job.id,
+    )
+    arg_ps = _ps_quote(cmd_arg)
+    work_ps = _ps_quote(str(work_dir))
+    name_ps = _ps_quote(name)
     ps = f"""
 $ErrorActionPreference = 'Stop'
 {trig}
 $st = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+  -DontStopOnIdleEnd `
   -WakeToRun `
+  -RestartCount 3 `
+  -RestartInterval (New-TimeSpan -Minutes 1) `
   -ExecutionTimeLimit (New-TimeSpan -Hours 24)
-$a = New-ScheduledTaskAction -Execute {_ps_quote(str(launcher))} `
+$cmd = Join-Path $env:SystemRoot 'System32\\cmd.exe'
+$a = New-ScheduledTaskAction -Execute $cmd `
   -Argument {arg_ps} `
-  -WorkingDirectory {_ps_quote(str(work_dir))}
-Register-ScheduledTask -TaskName {_ps_quote(name)} -Action $a -Trigger $tr -Settings $st -Force | Out-Null
+  -WorkingDirectory {work_ps}
+$pr = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName {name_ps} -Action $a -Trigger $tr -Settings $st -Principal $pr -Force | Out-Null
 """.strip()
     r = _run_ps(ps)
     if r.returncode != 0:
@@ -130,14 +180,24 @@ Register-ScheduledTask -TaskName {_ps_quote(name)} -Action $a -Trigger $tr -Sett
     verify = _run_ps(
         (
             "$ErrorActionPreference='Stop'; "
-            f"$t=Get-ScheduledTask -TaskName {_ps_quote(name)}; "
+            f"$t=Get-ScheduledTask -TaskName {name_ps}; "
             "if (-not $t.Settings.WakeToRun) { "
             "  throw 'WakeToRun is not enabled on the task settings.' "
+            "} "
+            "if ($t.Settings.IdleSettings.StopOnIdleEnd) { "
+            "  throw 'StopOnIdleEnd is still enabled on the task settings.' "
+            "} "
+            "if ($t.Settings.RestartCount -lt 1) { "
+            "  throw 'RestartCount is not set on the task settings.' "
+            "} "
+            "$exe = [string]$t.Actions[0].Execute; "
+            "if ($exe -notmatch '(?i)cmd\\.exe$') { "
+            "  throw \"scheduled action Execute is not cmd.exe: $exe\" "
             "}"
         )
     )
     if verify.returncode != 0:
-        msg = (verify.stderr or verify.stdout or "").strip() or "could not verify WakeToRun"
+        msg = (verify.stderr or verify.stdout or "").strip() or "could not verify task settings"
         return False, msg
     return True, ""
 
